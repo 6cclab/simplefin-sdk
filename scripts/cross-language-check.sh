@@ -22,6 +22,15 @@ echo "==> Verifying generated output matches what is committed"
 go run ./cmd/simplefin-gen verify
 
 echo "==> Building the Node SDK"
+# Install first when absent. The script has to work on a fresh clone and in
+# CI, not only in a tree where someone has already run npm install --
+# tsconfig declares @types/node, so a missing node_modules fails the build
+# with a confusing "cannot find type definition file" rather than an obvious
+# missing-dependency error.
+if [ ! -d sdk/node/node_modules ]; then
+  echo "    installing node dependencies"
+  (cd sdk/node && { npm ci --silent || npm install --silent; })
+fi
 (cd sdk/node && npm run --silent build)
 
 echo "==> Building the Go canonicalizer"
