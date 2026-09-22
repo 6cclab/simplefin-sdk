@@ -1,5 +1,5 @@
 /**
- * @andrepato/simplefin — a typed client for the SimpleFIN protocol.
+ * @6cclab/simplefin — a typed client for the SimpleFIN protocol.
  *
  * @see https://www.simplefin.org/protocol.html
  */

@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	simplefin "github.com/andrepato/simplefin-sdk/sdk/go"
+	simplefin "github.com/6cclab/simplefin-sdk/sdk/go"
 )
 
 func main() {

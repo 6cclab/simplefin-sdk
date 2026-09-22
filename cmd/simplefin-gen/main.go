@@ -15,8 +15,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/andrepato/simplefin-sdk/internal/gen"
-	"github.com/andrepato/simplefin-sdk/internal/ir"
+	"github.com/6cclab/simplefin-sdk/internal/gen"
+	"github.com/6cclab/simplefin-sdk/internal/ir"
 )
 
 // defaultOut is where each language is generated when --out is omitted, and

@@ -55,7 +55,7 @@ function serviceFor(text: string): { service: ts.LanguageService; fileName: stri
 
 // Resolved by Node's self-reference support, so this exercises the published
 // `exports` map rather than a relative path into src.
-const PRELUDE = `import { createClient, isHttpError, type SimpleFinError, type Account, type Transaction } from "@andrepato/simplefin"
+const PRELUDE = `import { createClient, isHttpError, type SimpleFinError, type Account, type Transaction } from "@6cclab/simplefin"
 const client = createClient("https://u:p@host.invalid/simplefin")
 declare const account: Account
 declare const tx: Transaction

@@ -18,8 +18,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/andrepato/simplefin-sdk/internal/ir"
-	"github.com/andrepato/simplefin-sdk/templates"
+	"github.com/6cclab/simplefin-sdk/internal/ir"
+	"github.com/6cclab/simplefin-sdk/templates"
 )
 
 const (

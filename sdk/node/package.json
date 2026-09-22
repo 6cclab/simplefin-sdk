@@ -1,5 +1,5 @@
 {
-  "name": "@andrepato/simplefin",
+  "name": "@6cclab/simplefin",
   "version": "0.1.0",
   "description": "Typed SimpleFIN protocol client, generated from the protocol specification",
   "license": "MIT",
@@ -35,7 +35,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/andrepato/simplefin-sdk.git",
+    "url": "git+https://github.com/6cclab/simplefin-sdk.git",
     "directory": "sdk/node"
   },
   "devDependencies": {

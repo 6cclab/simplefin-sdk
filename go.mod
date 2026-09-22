@@ -1,4 +1,4 @@
-module github.com/andrepato/simplefin-sdk
+module github.com/6cclab/simplefin-sdk
 
 go 1.26.3
 

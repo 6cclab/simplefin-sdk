@@ -44,7 +44,7 @@ func packageDocs(t *testing.T) *doc.Package {
 		t.Fatal("no package source files found")
 	}
 
-	pkg, err := doc.NewFromFiles(fset, values(files), "github.com/andrepato/simplefin-sdk/sdk/go")
+	pkg, err := doc.NewFromFiles(fset, values(files), "github.com/6cclab/simplefin-sdk/sdk/go")
 	if err != nil {
 		t.Fatalf("building package docs: %v", err)
 	}

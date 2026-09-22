@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/andrepato/simplefin-sdk/internal/ir"
+	"github.com/6cclab/simplefin-sdk/internal/ir"
 )
 
 // docWidth is the column the doc renderers wrap at, chosen to keep generated

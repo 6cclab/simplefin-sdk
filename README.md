@@ -16,13 +16,13 @@ SDK that would otherwise drift apart.
 **Go**
 
 ```bash
-go get github.com/andrepato/simplefin-sdk/sdk/go
+go get github.com/6cclab/simplefin-sdk/sdk/go
 ```
 
 **Node**
 
 ```bash
-npm install @andrepato/simplefin
+npm install @6cclab/simplefin
 ```
 
 ## Use
@@ -30,7 +30,7 @@ npm install @andrepato/simplefin
 **Go**
 
 ```go
-import simplefin "github.com/andrepato/simplefin-sdk/sdk/go"
+import simplefin "github.com/6cclab/simplefin-sdk/sdk/go"
 
 // One-time: exchange a setup token for an Access URL. Store it securely —
 // it embeds Basic Auth credentials. This is one-shot; a failure means you
@@ -71,7 +71,7 @@ for _, e := range set.Errlist {
 ```ts
 import {
   claim, createClient, ErrorCodes, isAuthError, postedTime,
-} from "@andrepato/simplefin"
+} from "@6cclab/simplefin"
 
 const accessUrl = await claim(setupToken)
 const client = createClient(accessUrl)

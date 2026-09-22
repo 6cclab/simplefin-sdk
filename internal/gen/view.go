@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/andrepato/simplefin-sdk/internal/ir"
+	"github.com/6cclab/simplefin-sdk/internal/ir"
 )
 
 // The view model flattens the IR into exactly what templates need, so the
