@@ -1,0 +1,67 @@
+{
+  "accounts": [
+    {
+      "availableBalance": "1200.00",
+      "balance": "1250.33",
+      "balanceDate": 1757635200,
+      "connId": "CONN-1",
+      "connName": "Example Bank - Jeff",
+      "currency": "USD",
+      "id": "ACT-001",
+      "name": "Checking",
+      "transactions": [
+        {
+          "amount": "-33.45",
+          "description": "SQ *BLUE BOTTLE COFF #47",
+          "id": "TXN-001",
+          "pending": false,
+          "posted": 1757548800,
+          "transactedAt": 0
+        },
+        {
+          "amount": "-120.00",
+          "description": "ACH DEBIT - UTILITY",
+          "id": "TXN-002",
+          "pending": true,
+          "posted": 0,
+          "transactedAt": 1757462400
+        }
+      ]
+    },
+    {
+      "availableBalance": null,
+      "balance": "40.00",
+      "balanceDate": 1757635200,
+      "connId": "CONN-1",
+      "connName": "",
+      "currency": "USD",
+      "id": "ACT-002",
+      "name": "Savings",
+      "transactions": []
+    }
+  ],
+  "connections": [
+    {
+      "connId": "CONN-1",
+      "name": "Example Bank - Jeff",
+      "orgId": "ORG-1",
+      "orgName": "Example Bank",
+      "orgUrl": "https://examplebank.com",
+      "sfinUrl": "https://bridge.example/simplefin"
+    }
+  ],
+  "errlist": [
+    {
+      "accountId": "",
+      "code": "con.auth",
+      "connId": "CONN-1",
+      "msg": "Authentication required"
+    },
+    {
+      "accountId": "ACT-002",
+      "code": "act.failed",
+      "connId": "",
+      "msg": "Failed to get all transactions. Try again later."
+    }
+  ]
+}

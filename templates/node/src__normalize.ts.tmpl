@@ -1,0 +1,267 @@
+{{ .Header }}
+
+import { ErrorCodes, normalizeErrorCode, type ErrorCode } from "./errorcodes.js"
+import type {
+{{- range $t := .Types }}
+  {{ $t.TSName }},
+{{- end }}
+{{- range $t := .V1Types }}
+  {{ $t.TSName }},
+{{- end }}
+} from "./models.js"
+
+/*
+ * Parsing helpers.
+ *
+ * These deliberately mirror Go's encoding/json semantics field for field, so
+ * the two SDKs accept and reject exactly the same payloads:
+ *
+ *   - a missing field, or an explicit null, yields the zero value
+ *   - a field present with the wrong type is an error, not a coercion
+ *
+ * The second rule matters most for money. A server that sends the number 12.5
+ * where the protocol documents a string is broken, and a client that quietly
+ * renders that as an empty balance is more dangerous than one that refuses the
+ * response.
+ */
+
+/** Thrown when a field is present on the wire with the wrong type. */
+export class SimpleFinParseError extends Error {
+  override readonly name: string = "SimpleFinParseError"
+  /** Dotted path to the offending field, e.g. "accounts[0].balance". */
+  readonly path: string
+
+  constructor(path: string, expected: string, got: unknown) {
+    super(
+      `simplefin: ${path} should be ${expected}, got ${Array.isArray(got) ? "array" : typeof got}`,
+    )
+    this.path = path
+  }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+}
+
+function absent(v: unknown): boolean {
+  return v === undefined || v === null
+}
+
+function str(v: unknown, path: string): string {
+  if (absent(v)) return ""
+  if (typeof v !== "string") throw new SimpleFinParseError(path, "a string", v)
+  return v
+}
+
+function optStr(v: unknown, path: string): string | undefined {
+  if (absent(v)) return undefined
+  if (typeof v !== "string") throw new SimpleFinParseError(path, "a string", v)
+  return v
+}
+
+function num(v: unknown, path: string): number {
+  if (absent(v)) return 0
+  if (typeof v !== "number" || !Number.isFinite(v)) {
+    throw new SimpleFinParseError(path, "a number", v)
+  }
+  return v
+}
+
+function bool(v: unknown, path: string): boolean {
+  if (absent(v)) return false
+  if (typeof v !== "boolean") throw new SimpleFinParseError(path, "a boolean", v)
+  return v
+}
+
+function record(v: unknown, path: string): Record<string, unknown> | undefined {
+  if (absent(v)) return undefined
+  if (!isRecord(v)) throw new SimpleFinParseError(path, "an object", v)
+  return v
+}
+
+function list(v: unknown, path: string): unknown[] {
+  if (absent(v)) return []
+  if (!Array.isArray(v)) throw new SimpleFinParseError(path, "an array", v)
+  return v
+}
+
+function strList(v: unknown, path: string): string[] {
+  return list(v, path).map((x, i) => str(x, `${path}[${i}]`))
+}
+
+{{ range $t := .Types }}
+{{- if not $t.Root }}
+/** Parses a wire {{ $t.TSName }} into the camelCase model. */
+export function parse{{ $t.Name }}(input: unknown, path = "{{ lower $t.Name }}"): {{ $t.TSName }} {
+  const o = record(input, path) ?? {}
+  return {
+{{- range $f := $t.Fields }}
+{{- if not $f.Synthetic }}
+{{- if $f.IsRefArray }}
+    {{ $f.TSName }}: list(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`).map((x, i) => parse{{ $f.Elem }}(x, `${path}.{{ $f.Name }}[${i}]`)),
+{{- else if $f.IsStringArray }}
+    {{ $f.TSName }}: strList(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`),
+{{- else if $f.IsEpoch }}
+    {{ $f.TSName }}: num(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`),
+{{- else if $f.IsMoney }}
+{{- if $f.Optional }}
+    {{ $f.TSName }}: optStr(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`),
+{{- else }}
+    {{ $f.TSName }}: str(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`),
+{{- end }}
+{{- else if eq $f.TSType "boolean" }}
+    {{ $f.TSName }}: bool(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`),
+{{- else if eq $f.TSType "Record<string, unknown>" }}
+    {{ $f.TSName }}: record(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`),
+{{- else if eq $f.TSType "ErrorCode" }}
+    {{ $f.TSName }}: str(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`) as ErrorCode,
+{{- else }}
+    {{ $f.TSName }}: str(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`),
+{{- end }}
+{{- end }}
+{{- end }}
+  }
+}
+{{ end }}
+{{- end }}
+{{- range $t := .V1Types }}
+/** Parses a protocol v1 {{ $t.Name }}. */
+export function parse{{ $t.Name }}(input: unknown, path = "{{ lower $t.Name }}"): {{ $t.TSName }} {
+  const o = record(input, path) ?? {}
+  return {
+{{- range $f := $t.Fields }}
+    {{ $f.TSName }}: str(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`),
+{{- end }}
+  }
+}
+{{ end }}
+/**
+ * Derives a stable connection id for a protocol v1 org, which has none of its
+ * own. The fallback order is defined by the specification file so every
+ * language derives the same id from the same response.
+ */
+function deriveConnId(org: {{ (index .V1Types 0).Name }}): string {
+{{- range $s := .ConnIDFrom }}
+  if ((org.{{ $s.TSName }} ?? "").trim() !== "") return (org.{{ $s.TSName }} ?? "").trim()
+{{- end }}
+  return ""
+}
+
+/**
+ * Picks the most human-friendly label a v1 org offers. The v1 specification
+ * requires either domain or name, so at least one is expected.
+ */
+function orgDisplayName(org: {{ (index .V1Types 0).Name }}): string {
+  const name = (org.name ?? "").trim()
+  return name !== "" ? name : (org.domain ?? "").trim()
+}
+
+/**
+ * Flattens errlist or the deprecated errors array into Error objects.
+ *
+ * An entry may be a plain string (protocol v1) or an object (protocol v2). An
+ * object without a recognizable message is preserved as its raw JSON rather
+ * than rendered as an unhelpful placeholder — the protocol requires these be
+ * shown to the user, so losing them defeats the point.
+ *
+ * The specification names the message field `msg`; `message` and
+ * `description` are also accepted because servers have been observed using
+ * them and the protocol requires that error text reach the user.
+ */
+export function normalizeErrors(input: unknown): SimpleFinError[] {
+  const o = record(input, "response") ?? {}
+  let entries = list(o["errlist"], "errlist")
+  if (entries.length === 0) entries = list(o["errors"], "errors")
+
+  return entries.map((entry): SimpleFinError => {
+    // Protocol v1: a bare string with no code of its own.
+    if (typeof entry === "string") {
+      return {
+        code: ErrorCodes.{{ .GeneralNakedConst }},
+        msg: entry,
+        connId: "",
+        accountId: "",
+        raw: entry,
+      }
+    }
+
+    if (isRecord(entry)) {
+      const msg =
+        optStr(entry["msg"], "errlist.msg") ??
+        optStr(entry["message"], "errlist.message") ??
+        optStr(entry["description"], "errlist.description") ??
+        // Never drop the text: fall back to the raw JSON. It is serialized
+        // compactly so the result does not depend on the server's
+        // whitespace, which also keeps this identical across language
+        // targets.
+        JSON.stringify(entry)
+
+      // A non-string code is tolerated here rather than rejected: the
+      // protocol requires that error text reach the user, and refusing the
+      // whole response over a malformed error object would suppress it.
+      const rawCode = typeof entry["code"] === "string" ? entry["code"] : undefined
+      const code = rawCode ? normalizeErrorCode(rawCode as ErrorCode) : ErrorCodes.{{ .GeneralNakedConst }}
+
+      return {
+        code,
+        msg,
+        connId: typeof entry["conn_id"] === "string" ? entry["conn_id"] : "",
+        accountId: typeof entry["account_id"] === "string" ? entry["account_id"] : "",
+        raw: entry,
+      }
+    }
+
+    const asJson = JSON.stringify(entry)
+    return {
+      code: ErrorCodes.{{ .GeneralNakedConst }},
+      msg: asJson,
+      connId: "",
+      accountId: "",
+      raw: asJson,
+    }
+  })
+}
+
+/**
+ * Converts a decoded wire response into the public model.
+ *
+{{ tsDocBody " * " .NormalizationDoc }}
+ */
+export function normalizeAccountSet(input: unknown): AccountSet {
+  const o = record(input, "response") ?? {}
+
+  const connections = list(o["connections"], "connections").map((c, i) =>
+    parseConnection(c, `connections[${i}]`),
+  )
+  const accounts: Account[] = []
+
+  // Protocol v1 carries no connections array. Synthesize one entry per
+  // distinct org so that v1 and v2 responses present identically.
+  const seen = new Set(connections.map((c) => c.connId))
+
+  for (const [i, rawAccount] of list(o["accounts"], "accounts").entries()) {
+    const account = parseAccount(rawAccount, `accounts[${i}]`)
+    const orgRaw = isRecord(rawAccount) ? rawAccount["org"] : undefined
+
+    if (isRecord(orgRaw)) {
+      const org = parseOrgV1(orgRaw, `accounts[${i}].org`)
+      const connId = deriveConnId(org)
+      if (account.connId === "") account.connId = connId
+      if (connId !== "" && !seen.has(connId)) {
+        seen.add(connId)
+        connections.push({
+          connId,
+          name: orgDisplayName(org),
+          orgId: org.id ?? "",
+          orgName: org.name ?? "",
+          orgUrl: org.url ?? "",
+          sfinUrl: org.sfinUrl ?? "",
+        })
+      }
+    }
+
+    accounts.push(account)
+  }
+
+  return { errlist: normalizeErrors(o), connections, accounts }
+}

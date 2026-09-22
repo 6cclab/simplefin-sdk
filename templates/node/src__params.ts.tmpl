@@ -1,0 +1,60 @@
+{{ .Header }}
+
+import { DEFAULT_PROTOCOL_VERSION, type ProtocolVersion } from "./errorcodes.js"
+{{ with .GetAccounts }}
+/**
+ * The documented query parameters for `{{ .Method }} {{ .Path }}`.
+ *
+ * Every property is optional; an empty object requests protocol version
+ * {{ $.DefaultVersion }} with no filters.
+ */
+export interface {{ pascal .Name }}Params {
+{{- range $p := .Params }}
+{{- if $p.IsUnixSeconds }}
+{{ tsDocRemark "  " $p.Doc "Accepts a `Date` or raw Unix epoch seconds." }}
+{{- else }}
+{{ tsDoc "  " $p.Doc }}
+{{- end }}
+  {{ $p.TSName }}?: {{ $p.TSType }}
+{{- end }}
+}
+
+/** Converts a `Date` or raw epoch seconds into the Unix seconds the wire wants. */
+function toUnixSeconds(value: Date | number): string {
+  const seconds = value instanceof Date ? Math.floor(value.getTime() / 1000) : value
+  return String(Math.trunc(seconds))
+}
+
+/**
+ * Serializes the parameters into a query string.
+ *
+ * The serialization rules are not uniform and each one is load-bearing:
+ * boolean flags are opt-in and sent as `"1"` or omitted entirely (never
+ * `"0"`), account filters are a repeated key rather than a comma-joined list,
+ * and timestamps are raw Unix seconds.
+ */
+export function encode{{ pascal .Name }}Params(
+  params: {{ pascal .Name }}Params = {},
+): URLSearchParams {
+  const q = new URLSearchParams()
+{{ range $p := .Params }}
+{{- if $p.IsUnixSeconds }}
+  if (params.{{ $p.TSName }} !== undefined) {
+    q.set({{ quote $p.Wire }}, toUnixSeconds(params.{{ $p.TSName }}))
+  }
+{{ else if $p.IsOptInOne }}
+  if (params.{{ $p.TSName }}) {
+    q.set({{ quote $p.Wire }}, "1")
+  }
+{{ else if $p.IsRepeated }}
+  for (const v of params.{{ $p.TSName }} ?? []) {
+    q.append({{ quote $p.Wire }}, v)
+  }
+{{ else if $p.IsWithDefault }}
+  const version: ProtocolVersion = params.{{ $p.TSName }} ?? DEFAULT_PROTOCOL_VERSION
+  q.set({{ quote $p.Wire }}, version)
+{{ end }}
+{{- end }}
+  return q
+}
+{{ end }}

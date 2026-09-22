@@ -1,0 +1,61 @@
+{
+  "accounts": [
+    {
+      "availableBalance": "1200.00",
+      "balance": "1250.33",
+      "balanceDate": 1757635200,
+      "connId": "ORG-V1-1",
+      "connName": "",
+      "currency": "USD",
+      "id": "ACT-001",
+      "name": "Checking",
+      "transactions": [
+        {
+          "amount": "-33.45",
+          "description": "SQ *BLUE BOTTLE COFF #47",
+          "id": "TXN-001",
+          "pending": false,
+          "posted": 1757548800,
+          "transactedAt": 0
+        }
+      ]
+    },
+    {
+      "availableBalance": null,
+      "balance": "10.00",
+      "balanceDate": 1757635200,
+      "connId": "othercu.org",
+      "connName": "",
+      "currency": "USD",
+      "id": "ACT-900",
+      "name": "Credit Union Savings",
+      "transactions": []
+    }
+  ],
+  "connections": [
+    {
+      "connId": "ORG-V1-1",
+      "name": "Example Bank",
+      "orgId": "ORG-V1-1",
+      "orgName": "Example Bank",
+      "orgUrl": "https://examplebank.com",
+      "sfinUrl": "https://sfin.examplebank.com"
+    },
+    {
+      "connId": "othercu.org",
+      "name": "othercu.org",
+      "orgId": "",
+      "orgName": "",
+      "orgUrl": "",
+      "sfinUrl": "https://sfin.othercu.org"
+    }
+  ],
+  "errlist": [
+    {
+      "accountId": "",
+      "code": "gen.",
+      "connId": "",
+      "msg": "You must reauthenticate with Example Bank."
+    }
+  ]
+}

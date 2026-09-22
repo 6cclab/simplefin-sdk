@@ -1,0 +1,56 @@
+{{ .Header }}
+
+package {{ .Package }}
+
+import "time"
+{{ range $t := .Types }}
+{{ goDoc "" $t.Name $t.Doc }}
+type {{ $t.Name }} struct {
+{{- range $f := $t.Fields }}
+{{ goDoc "\t" $f.GoName $f.Doc }}
+{{- if $f.IsMoney }}
+	// This is a numeric string as sent by the server. Never parse it as a
+	// float — SimpleFIN transmits amounts as strings precisely to avoid the
+	// precision loss that causes.
+{{- end }}
+{{- if $f.IsEpoch }}
+	// Unix epoch seconds. A value of zero or less means absent, not 1970.
+{{- end }}
+	{{ $f.GoName }} {{ $f.GoType }} {{ $f.GoTag }}
+{{- end }}
+}
+{{ range $a := $t.Accessors }}
+{{ goDoc "" $a.GoName $a.Doc }}
+func ({{ $t.Recv }} {{ $t.Name }}) {{ $a.GoName }}() *time.Time {
+{{- range $s := $a.Steps }}
+{{- if $s.IsLast }}
+	return epochToTime({{ $t.Recv }}.{{ $s.GoName }})
+{{- else }}
+	if ts := epochToTime({{ $t.Recv }}.{{ $s.GoName }}); ts != nil {
+		return ts
+	}
+{{- end }}
+{{- end }}
+}
+{{ end }}
+{{- end }}
+{{ range $t := .V1Types }}
+{{ goDoc "" $t.Name $t.Doc }}
+type {{ $t.Name }} struct {
+{{- range $f := $t.Fields }}
+{{ goDoc "\t" $f.GoName $f.Doc }}
+	{{ $f.GoName }} {{ $f.GoType }} {{ $f.GoTag }}
+{{- end }}
+}
+{{ end }}
+// epochToTime converts Unix seconds to a time, treating zero and negative
+// values as absent. Every caller must agree on that rule — a bare zero check
+// in one place and a > 0 check in another is how pending transactions end up
+// dated to 1970 in one code path and null in the next.
+func epochToTime(seconds int64) *time.Time {
+	if seconds <= 0 {
+		return nil
+	}
+	t := time.Unix(seconds, 0).UTC()
+	return &t
+}

@@ -1,0 +1,77 @@
+{{ .Header }}
+
+package {{ .Package }}
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// goldenDir is the shared fixture directory. Every language target parses
+// these same files and must produce the same canonical output, which is what
+// keeps the implementations from drifting apart.
+const goldenDir = "../../spec/golden"
+
+// TestConformance parses every fixture and compares the canonical rendering
+// against its hand-authored .expect.json.
+//
+// The expectations are written by hand from the protocol specification, not
+// captured from this implementation's output. Regenerating them from the code
+// under test would make this assert only that the code agrees with itself.
+func TestConformance(t *testing.T) {
+	entries, err := os.ReadDir(goldenDir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", goldenDir, err)
+	}
+
+	ran := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".expect.json") {
+			continue
+		}
+
+		ran++
+		t.Run(strings.TrimSuffix(name, ".json"), func(t *testing.T) {
+			input, err := os.ReadFile(filepath.Join(goldenDir, name))
+			if err != nil {
+				t.Fatalf("reading fixture: %v", err)
+			}
+
+			expectPath := filepath.Join(goldenDir,
+				strings.TrimSuffix(name, ".json")+".expect.json")
+			want, err := os.ReadFile(expectPath)
+			if err != nil {
+				t.Fatalf("reading expectation: %v", err)
+			}
+
+			var raw rawAccountSet
+			if err := json.Unmarshal(input, &raw); err != nil {
+				t.Fatalf("parsing fixture: %v", err)
+			}
+
+			got, err := CanonicalJSON(normalizeAccountSet(&raw))
+			if err != nil {
+				t.Fatalf("canonicalizing: %v", err)
+			}
+
+			if !bytes.Equal(normalizeNewlines(got), normalizeNewlines(want)) {
+				t.Errorf("canonical output does not match %s\n--- got ---\n%s\n--- want ---\n%s",
+					filepath.Base(expectPath), got, want)
+			}
+		})
+	}
+
+	if ran == 0 {
+		// An empty fixture directory would otherwise report as a pass.
+		t.Fatalf("no fixtures found in %s", goldenDir)
+	}
+}
+
+func normalizeNewlines(b []byte) []byte {
+	return bytes.TrimRight(bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n")), "\n")
+}

@@ -1,0 +1,80 @@
+{{ .Header }}
+
+/**
+ * Thrown for any non-2xx status the protocol does not assign a specific
+ * meaning to.
+ *
+ * `op` is always a fixed literal such as `"GET /accounts"` and never the
+ * request URL, because an Access URL embeds Basic Auth credentials and error
+ * messages end up in logs.
+ */
+export class SimpleFinHttpError extends Error {
+  override readonly name: string = "SimpleFinHttpError"
+  /** The HTTP status code received. */
+  readonly status: number
+  /** The operation that failed, as a fixed literal. */
+  readonly op: string
+
+  constructor(status: number, op: string, message?: string) {
+    super(message ?? `simplefin: ${op} failed with status ${status}`)
+    this.status = status
+    this.op = op
+  }
+}
+{{ range $s := .Statuses }}
+{{- if ne $s.Kind "ok" }}
+{{ tsDoc "" $s.Doc }}
+export class SimpleFin{{ $s.Const }}Error extends SimpleFinHttpError {
+  override readonly name: string = "SimpleFin{{ $s.Const }}Error"
+
+  constructor(op: string) {
+    super({{ $s.Code }}, op, `simplefin: {{ lower $s.Const }} ({{ $s.Code }}) on ${op}`)
+  }
+}
+{{ end }}
+{{- end }}
+/**
+ * Maps an HTTP status to an error, or null for success.
+ */
+export function statusError(status: number, op: string): SimpleFinHttpError | null {
+  if (status >= 200 && status < 300) return null
+  switch (status) {
+{{- range $s := .Statuses }}
+{{- if ne $s.Kind "ok" }}
+    case {{ $s.Code }}:
+      return new SimpleFin{{ $s.Const }}Error(op)
+{{- end }}
+{{- end }}
+    default:
+      return new SimpleFinHttpError(status, op)
+  }
+}
+
+/*
+ * Narrowing guards.
+ *
+ * TypeScript types a `catch` binding as `unknown`, so exporting error classes
+ * alone would leave callers writing `as` casts to get at `status`. These
+ * guards let a catch block narrow and autocomplete instead. They check the
+ * `name` property rather than using `instanceof` so they still work when two
+ * copies of the package end up in one dependency tree.
+ */
+
+/** Narrows an unknown caught value to any SimpleFIN HTTP error. */
+export function isHttpError(e: unknown): e is SimpleFinHttpError {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    "op" in e &&
+    "status" in e &&
+    typeof (e as { status: unknown }).status === "number"
+  )
+}
+{{ range $s := .Statuses }}
+{{- if ne $s.Kind "ok" }}
+/** Narrows an unknown caught value to a {{ $s.Code }} error. */
+export function is{{ $s.Const }}Error(e: unknown): e is SimpleFin{{ $s.Const }}Error {
+  return isHttpError(e) && e.status === {{ $s.Code }}
+}
+{{ end }}
+{{- end }}

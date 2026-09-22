@@ -1,0 +1,42 @@
+{
+  "errors": [
+    "You must reauthenticate with Example Bank."
+  ],
+  "accounts": [
+    {
+      "org": {
+        "domain": "examplebank.com",
+        "name": "Example Bank",
+        "sfin-url": "https://sfin.examplebank.com",
+        "url": "https://examplebank.com",
+        "id": "ORG-V1-1"
+      },
+      "id": "ACT-001",
+      "name": "Checking",
+      "currency": "USD",
+      "balance": "1250.33",
+      "available-balance": "1200.00",
+      "balance-date": 1757635200,
+      "transactions": [
+        {
+          "id": "TXN-001",
+          "posted": 1757548800,
+          "amount": "-33.45",
+          "description": "SQ *BLUE BOTTLE COFF #47"
+        }
+      ]
+    },
+    {
+      "org": {
+        "domain": "othercu.org",
+        "sfin-url": "https://sfin.othercu.org"
+      },
+      "id": "ACT-900",
+      "name": "Credit Union Savings",
+      "currency": "USD",
+      "balance": "10.00",
+      "balance-date": 1757635200,
+      "transactions": []
+    }
+  ]
+}

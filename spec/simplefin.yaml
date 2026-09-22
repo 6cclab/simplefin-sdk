@@ -1,0 +1,596 @@
+# SimpleFIN protocol — machine-readable specification.
+#
+# This file is the single source of truth for every generated SDK. Doc strings
+# are transcribed verbatim from the protocol specification's own description
+# columns so that editor hover text matches what the spec actually says.
+#
+# Sources:
+#   v2  https://www.simplefin.org/protocol.html      (version 2.0.0-draft, 2026-03-19)
+#   v1  https://www.simplefin.org/protocol-v1.html
+#
+# Field `kind` values carry semantics that JSON Schema and OpenAPI cannot express:
+#
+#   string         plain UTF-8 string
+#   numericString  money. Sent as a string deliberately. NEVER parse to a float.
+#   epochSeconds   Unix epoch seconds. Values <= 0 mean "absent", not 1970.
+#   bool           boolean
+#   extra          open-ended server extension object
+#   ref:<Type>     nested type
+#   array:<Type>   list of nested type
+#   array:string   list of strings
+#
+# Every field has both `wire` (the key on the wire) and `name` (camelCase, what
+# the SDK exposes). The wire format mixes hyphen-case, snake_case and bare
+# lowercase; the SDKs present camelCase uniformly.
+
+protocol:
+  name: SimpleFIN
+  specVersion: "2.0.0-draft"
+  specUrl: https://www.simplefin.org/protocol.html
+  supportedVersions: ["1", "2"]
+  defaultVersion: "2"
+  summary: >-
+    The SimpleFIN protocol allows users to share read-only financial data with
+    third parties. It's similar to RSS, but for financial data.
+
+# ---------------------------------------------------------------------------
+# Data types (the normalized v2 model — v1 responses are converted into this)
+# ---------------------------------------------------------------------------
+
+types:
+  - name: Error
+    doc: >-
+      A structured error from the Account Set's errlist. The protocol requires
+      that these be displayed to the user, and that all strings be sanitized
+      before display.
+    fields:
+      - name: code
+        wire: code
+        kind: string
+        required: true
+        enum: errorCodes
+        doc: One of the documented error codes.
+      - name: msg
+        wire: msg
+        kind: string
+        required: true
+        doc: String error suitable for displaying to users.
+      - name: connId
+        wire: conn_id
+        kind: string
+        required: false
+        doc: >-
+          Connection id. This is only given if the error is specific to a
+          particular connection.
+      - name: accountId
+        wire: account_id
+        kind: string
+        required: false
+        doc: >-
+          Account id. This is only given if the error is specific to a
+          particular account.
+      - name: raw
+        wire: null
+        kind: any
+        required: false
+        synthetic: true
+        doc: >-
+          The error exactly as the server sent it. Preserved because the
+          protocol documents errlist as an array of objects without pinning
+          their shape, and because protocol v1 sent plain strings here.
+
+  - name: Connection
+    doc: >-
+      This represents a single connection to an institution. Users with 2 sets
+      of login credentials for a particular bank will have 2 different
+      Connections, each with the same org_* fields.
+    fields:
+      - name: connId
+        wire: conn_id
+        kind: string
+        required: true
+        doc: ID of a particular connection for a financial institution.
+      - name: name
+        wire: name
+        kind: string
+        required: true
+        doc: >-
+          Human-friendly name for this connection. This should include the
+          financial institution name (and may be identical to the financial
+          institution's name in some cases).
+      - name: orgId
+        wire: org_id
+        kind: string
+        required: true
+        doc: >-
+          ID of the financial institution. The ID must be unique per SimpleFIN
+          server, but it is not guaranteed to be globally unique.
+      - name: orgName
+        wire: org_name
+        kind: string
+        required: false
+        doc: >-
+          Name of the financial institution. Present in the specification's
+          GET /accounts example but absent from its Connection attribute table,
+          so it is modelled as optional.
+      - name: orgUrl
+        wire: org_url
+        kind: string
+        required: false
+        doc: Domain name of the financial institution.
+      - name: sfinUrl
+        wire: sfin_url
+        # Protocol v1 spelled this sfin-url (hyphen) and nested it under `org`.
+        wireV1: sfin-url
+        kind: string
+        required: true
+        doc: Root URL of organization's SimpleFIN Server.
+
+  - name: Transaction
+    doc: A single transaction within an Account.
+    fields:
+      - name: id
+        wire: id
+        kind: string
+        required: true
+        doc: >-
+          An ID that uniquely describes a transaction within an Account. An
+          organization may reuse transaction ids for different accounts, but
+          may never reuse a transaction id within an account.
+      - name: posted
+        wire: posted
+        kind: epochSeconds
+        required: true
+        doc: >-
+          This is when the transaction posted to the account. If the
+          transaction is pending, this may be 0.
+      - name: amount
+        wire: amount
+        kind: numericString
+        required: true
+        doc: >-
+          Amount of transaction. Positive numbers indicate money being
+          deposited into the account.
+      - name: description
+        wire: description
+        kind: string
+        required: true
+        doc: A human-readable description of what the transaction was for.
+      - name: transactedAt
+        wire: transacted_at
+        kind: epochSeconds
+        required: false
+        doc: This is when the transaction happened.
+      - name: pending
+        wire: pending
+        kind: bool
+        required: false
+        doc: >-
+          true indicates that this transaction has not yet posted. Default is
+          false (or absent), meaning the transaction has posted.
+      - name: extra
+        wire: extra
+        kind: extra
+        required: false
+        doc: >-
+          This optional attribute may be used to include extra
+          transaction-specific data that is not defined in this standard. It is
+          up to the Server to decide whether or not to include data in here.
+    accessors:
+      - name: postedTime
+        returns: timeOrNull
+        doc: >-
+          The transaction's effective date. posted is 0 while a transaction is
+          pending, which would otherwise convert to 1970-01-01 and sort every
+          pending row to the beginning of history. Falls back to transactedAt,
+          then reports nothing.
+        # Implemented by the generated accessor: first positive value wins.
+        prefer: [posted, transactedAt]
+      - name: transactedTime
+        returns: timeOrNull
+        doc: transactedAt as a time, or null when unset.
+        prefer: [transactedAt]
+
+  - name: Account
+    doc: >-
+      One account within a Connection. Note that `id` is unique only within its
+      Connection, never globally — callers keying storage on `id` alone will
+      collide across institutions.
+    fields:
+      - name: id
+        wire: id
+        kind: string
+        required: true
+        doc: >-
+          String that uniquely identifies the account within the Connection. It
+          is recommended that this id be chosen such that it does not reveal
+          any sensitive data (login information for the bank's web banking
+          portal, for instance).
+      - name: name
+        wire: name
+        kind: string
+        required: true
+        doc: >-
+          A name that uniquely describes an account among all the users other
+          accounts. This name should be chosen so that a person can easily
+          associate it with only one of their accounts within an Connection.
+      - name: connId
+        wire: conn_id
+        kind: string
+        required: true
+        doc: ID of the account's Connection.
+      - name: connName
+        wire: conn_name
+        kind: string
+        required: false
+        doc: >-
+          Name of the account's Connection. Present in the specification's
+          GET /accounts example but absent from its Account attribute table,
+          so it is modelled as optional.
+      - name: currency
+        wire: currency
+        kind: string
+        required: true
+        doc: >-
+          If the currency is a standard currency, this is the currency code
+          from the official ISO 4217. For example "ZMW" or "USD". If this is a
+          custom currency, it is a URL — see resolveCurrency.
+      - name: balance
+        wire: balance
+        kind: numericString
+        required: true
+        doc: The balance of the account as of balanceDate.
+      - name: availableBalance
+        wire: available-balance
+        kind: numericString
+        required: false
+        doc: >-
+          The available balance of the account as of balanceDate. This may be
+          omitted if it is the same as balance.
+      - name: balanceDate
+        wire: balance-date
+        kind: epochSeconds
+        required: true
+        doc: >-
+          The timestamp when the balance and available-balance became what they
+          are.
+      - name: transactions
+        wire: transactions
+        kind: array:Transaction
+        required: false
+        doc: >-
+          List of a subset of Transactions for this account, ordered by posted.
+      - name: extra
+        wire: extra
+        kind: extra
+        required: false
+        doc: >-
+          This optional attribute may be used to include extra account-specific
+          data that is not defined in this standard. It is up to the Server to
+          decide whether or not to include data in here.
+    accessors:
+      - name: balanceTime
+        returns: timeOrNull
+        doc: balanceDate as a time, or null when unset.
+        prefer: [balanceDate]
+
+  - name: AccountSet
+    doc: The GET /accounts response.
+    root: true
+    fields:
+      - name: errlist
+        wire: errlist
+        kind: array:Error
+        required: true
+        doc: List of errors.
+        # v1 sent `errors` as an array of plain strings. The normalizer folds
+        # that shape into this one.
+        wireV1: errors
+      - name: connections
+        wire: connections
+        kind: array:Connection
+        required: true
+        doc: >-
+          List of Connections. In protocol v1 institution identity was nested
+          under each account as `org`; the normalizer synthesizes this list.
+      - name: accounts
+        wire: accounts
+        kind: array:Account
+        required: true
+        doc: List of Accounts.
+
+  - name: Info
+    doc: The GET /info response, describing what the server supports.
+    fields:
+      - name: versions
+        wire: versions
+        kind: array:string
+        required: true
+        doc: An array of version string prefixes that this server supports.
+
+  - name: Currency
+    doc: >-
+      A custom currency, resolved by GET-ing an Account's currency URL.
+      SimpleFIN supports custom currencies such as Frequent Flyer Miles,
+      Rewards Points, and similar. All strings obtained from these requests
+      must be sanitized when displaying them to users.
+    fields:
+      - name: name
+        wire: name
+        kind: string
+        required: true
+        doc: Human-readable name of the currency.
+      - name: abbr
+        wire: abbr
+        kind: string
+        required: true
+        doc: Human-readable short name of the currency.
+
+# ---------------------------------------------------------------------------
+# Protocol v1 input shapes (parsed, then normalized into the types above)
+# ---------------------------------------------------------------------------
+
+v1Types:
+  - name: OrgV1
+    doc: >-
+      Protocol v1 nested institution identity inside each Account under `org`.
+      Either domain or name is required; both may be specified. Protocol v2
+      replaced this with a top-level connections list.
+    fields:
+      - name: domain
+        wire: domain
+        kind: string
+        required: false
+        doc: Domain name of the financial institution.
+      - name: name
+        wire: name
+        kind: string
+        required: false
+        doc: Name of the financial institution.
+      - name: sfinUrl
+        wire: sfin-url
+        kind: string
+        required: false
+        doc: Root URL of organization's SimpleFIN Server.
+      - name: url
+        wire: url
+        kind: string
+        required: false
+        doc: Optional URL of financial institution.
+      - name: id
+        wire: id
+        kind: string
+        required: false
+        doc: >-
+          Optional ID for the financial institution. The ID must be unique per
+          SimpleFIN server, but it is not guaranteed that IDs are globally
+          unique. Prefer domain as a globally unique ID for each institution.
+
+# How a v1 response becomes the normalized v2 model.
+normalization:
+  connIdFrom: [id, domain, sfinUrl]   # first non-empty wins
+  doc: >-
+    v1 responses carry no conn_id and no connections list. One Connection is
+    synthesized per distinct org, with conn_id derived from the first non-empty
+    of org.id, org.domain, org.sfin-url. v1's `errors` array of plain strings
+    is folded into errlist entries whose code is the naked general prefix and
+    whose msg is the string itself.
+
+# ---------------------------------------------------------------------------
+# Error codes
+# ---------------------------------------------------------------------------
+#
+# Error codes are in the format prefix.[subcode]. Current valid prefixes are
+# gen, con or act indicating General, Connection or Account errors respectively.
+# Consumers of the protocol should handle unknown subcodes by falling back to
+# treating the error like a naked prefix.
+
+errorCodes:
+  openEnded: true   # unknown subcodes must remain assignable
+  unknownFallback: prefix
+  prefixes:
+    gen: General
+    con: Connection
+    act: Account
+  values:
+    - code: "gen."
+      const: General
+      extra: []
+      doc: General error.
+    - code: "gen.api"
+      const: GeneralAPI
+      extra: []
+      doc: >-
+        Error in how the API is being used. This is meant for the developer and
+        not the user.
+    - code: "gen.auth"
+      const: GeneralAuth
+      extra: []
+      doc: General authentication error (to the SimpleFIN Server).
+    - code: "con."
+      const: Connection
+      extra: [connId]
+      doc: General connection-level error.
+    - code: "con.auth"
+      const: ConnectionAuth
+      extra: [connId]
+      doc: Authentication issue for a connection.
+    - code: "act."
+      const: Account
+      extra: [accountId]
+      doc: General account-level error.
+    - code: "act.failed"
+      const: AccountFailed
+      extra: [accountId]
+      doc: Failed to get account information. Try again later.
+    - code: "act.missingdata"
+      const: AccountMissingData
+      extra: [accountId]
+      doc: Incomplete transaction listing. Try again later.
+
+# ---------------------------------------------------------------------------
+# HTTP status semantics
+# ---------------------------------------------------------------------------
+
+statuses:
+  - code: 200
+    kind: ok
+    doc: Successful response.
+  - code: 402
+    kind: paymentRequired
+    const: PaymentRequired
+    doc: Payment required.
+  - code: 403
+    kind: auth
+    const: Auth
+    doc: >-
+      Authentication failed. This could be because access has been revoked or
+      if the credentials are incorrect. When claiming, it means the token
+      either does not exist or has already been claimed by someone else —
+      which could mean the user's transaction information has been
+      compromised. SimpleFIN auth is all-or-nothing per Access URL, so this is
+      the signal to re-claim the whole Access URL rather than relink one
+      connection.
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+endpoints:
+  - name: info
+    method: GET
+    path: /info
+    auth: false
+    returns: Info
+    doc: >-
+      Find out what versions of the SimpleFIN Protocol the server supports. The
+      strings returned must be in MAJOR.MINOR.FIX or MAJOR.MINOR format.
+
+  - name: claim
+    method: POST
+    path: ":token"
+    auth: false
+    returnsRaw: accessUrl
+    doc: >-
+      Exchange a SimpleFIN Token for an Access URL. SimpleFIN Tokens are
+      Base64-encoded URLs; decode the token to get the URL to POST to. The
+      response body is the Access URL, which is a URL with Basic Auth
+      credentials embedded. This is one-shot — the server consumes the token
+      whether or not the caller successfully stores the result, so a failure
+      here means a new setup token must be generated. Never retry with the
+      same one.
+
+  - name: getAccounts
+    method: GET
+    path: /accounts
+    auth: true
+    returns: AccountSet
+    doc: Retrieve account and transaction data.
+    params:
+      - name: startDate
+        wire: start-date
+        kind: epochSeconds
+        required: false
+        serialize: unixSeconds
+        doc: >-
+          If given, transactions will be restricted to those on or after this
+          Unix epoch timestamp.
+      - name: endDate
+        wire: end-date
+        kind: epochSeconds
+        required: false
+        serialize: unixSeconds
+        doc: >-
+          If given, transactions will be restricted to those before (but not
+          on) this Unix epoch timestamp.
+      - name: pending
+        wire: pending
+        kind: bool
+        required: false
+        serialize: optInOne   # emitted as "1" when true, omitted when false
+        doc: >-
+          If true, pending transactions will be included (if supported). By
+          default, pending transactions are NOT included.
+      - name: accounts
+        wire: account
+        kind: array:string
+        required: false
+        serialize: repeated   # repeated key, never comma-joined
+        doc: >-
+          If given, only return information related to the given account ids.
+          Serialized as a repeated query parameter.
+      - name: balancesOnly
+        wire: balances-only
+        kind: bool
+        required: false
+        serialize: optInOne
+        doc: If true, no transaction data is returned.
+      - name: version
+        wire: version
+        kind: enum:supportedVersions
+        required: false
+        serialize: valueWithDefault
+        default: "2"
+        doc: >-
+          Must be 2 for this version of the protocol. Can be 1 for earlier
+          versions. The server chooses the default version if this is not
+          specified; this SDK sends 2 unless told otherwise.
+
+  - name: resolveCurrency
+    method: GET
+    path: "{currencyUrl}"
+    auth: false
+    returns: Currency
+    doc: >-
+      Resolve a custom currency. When an Account's currency is a URL rather
+      than an ISO 4217 code, GET that URL to obtain the currency's name and
+      abbreviation.
+
+# ---------------------------------------------------------------------------
+# Client behaviour that the hand-written clients must honour
+# ---------------------------------------------------------------------------
+#
+# Recorded here so the rules survive into every language target, and so
+# PORTING.md has something concrete to point at.
+
+clientRules:
+  - id: credentials-out-of-url
+    doc: >-
+      An Access URL embeds Basic Auth credentials
+      (https://user:pass@host/simplefin). Split them out and send an
+      Authorization header instead of leaving them in the request URL, so they
+      cannot leak into request logs, redirect targets, or error strings. Node's
+      fetch rejects userinfo in a URL outright, so this is load-bearing there
+      rather than merely prudent.
+  - id: never-wrap-url-or-transport-errors
+    doc: >-
+      URL parse errors and HTTP transport errors quote or embed the input URL,
+      which contains the credentials. Return a fixed message instead of
+      wrapping the underlying error.
+  - id: https-only
+    doc: >-
+      Only make requests to SSL/TLS URLs (i.e. HTTPS and never HTTP) and verify
+      all certificates. The SDK rejects any scheme other than http/https and
+      warns on http.
+  - id: status-before-decode
+    doc: >-
+      Check the HTTP status before attempting to decode JSON. The SimpleFIN
+      Bridge serves HTML error pages, so decoding first turns a 403 into a
+      confusing parse error. Guard on Content-Type too, for an HTML body served
+      with a 200.
+  - id: errlist-then-errors
+    doc: >-
+      Prefer errlist; fall back to the deprecated errors array. An entry may be
+      a plain string (v1) or an object. An object without a recognizable
+      message field is preserved as its raw JSON rather than being rendered as
+      a placeholder — the protocol requires these be shown to the user, so
+      losing them defeats the point.
+  - id: money-is-a-string
+    doc: >-
+      Amounts are transmitted as strings deliberately. Never parse them to a
+      float or double anywhere in the SDK. Expose the exact wire string and let
+      the caller choose a decimal representation.
+  - id: ids-are-not-globally-unique
+    doc: >-
+      Account id is unique only within its Connection; Transaction id is unique
+      only within its Account. Storage keyed on either alone will collide.

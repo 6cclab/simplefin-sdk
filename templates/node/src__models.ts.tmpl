@@ -1,0 +1,52 @@
+{{ .Header }}
+
+import type { ErrorCode } from "./errorcodes.js"
+{{ range $t := .Types }}
+{{ tsDoc "" $t.Doc }}
+export interface {{ $t.TSName }} {
+{{- range $f := $t.Fields }}
+{{- if $f.IsMoney }}
+{{ tsDocRemark "  " $f.Doc "Numeric string as sent by the server. Never parse as a float — SimpleFIN transmits amounts as strings precisely to avoid that precision loss." }}
+{{- else if $f.IsEpoch }}
+{{ tsDocRemark "  " $f.Doc "Unix epoch seconds. A value of zero or less means absent, not 1970." }}
+{{- else }}
+{{ tsDoc "  " $f.Doc }}
+{{- end }}
+  {{ $f.TSName }}{{ if $f.Optional }}?{{ end }}: {{ $f.TSType }}
+{{- end }}
+}
+{{ end }}
+{{- range $t := .V1Types }}
+{{ tsDoc "" $t.Doc }}
+export interface {{ $t.TSName }} {
+{{- range $f := $t.Fields }}
+{{ tsDoc "  " $f.Doc }}
+  {{ $f.TSName }}{{ if $f.Optional }}?{{ end }}: {{ $f.TSType }}
+{{- end }}
+}
+{{ end }}
+/**
+ * Converts Unix seconds to a Date, treating zero and negative values as
+ * absent. Every caller must agree on that rule — a bare zero check in one
+ * place and a > 0 check in another is how pending transactions end up dated
+ * to 1970 in one code path and null in the next.
+ */
+export function epochToDate(seconds: number | undefined): Date | null {
+  if (seconds === undefined || seconds <= 0) return null
+  return new Date(seconds * 1000)
+}
+{{ range $t := .Types }}
+{{- range $a := $t.Accessors }}
+{{ tsDoc "" $a.Doc }}
+export function {{ $a.TSName }}({{ $t.Recv }}: {{ $t.TSName }}): Date | null {
+{{- range $s := $a.Steps }}
+{{- if $s.IsLast }}
+  return epochToDate({{ $t.Recv }}.{{ $s.TSName }})
+{{- else }}
+  const from{{ pascal $s.TSName }} = epochToDate({{ $t.Recv }}.{{ $s.TSName }})
+  if (from{{ pascal $s.TSName }} !== null) return from{{ pascal $s.TSName }}
+{{- end }}
+{{- end }}
+}
+{{ end }}
+{{- end }}

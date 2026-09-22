@@ -1,0 +1,20 @@
+{
+  "errlist": [
+    {
+      "code": "con.somethingneverseenbefore",
+      "msg": "A subcode this SDK has never met",
+      "conn_id": "CONN-1"
+    },
+    {
+      "message": "Server used message instead of msg"
+    },
+    {
+      "description": "Server used description instead of msg"
+    },
+    {
+      "code": 7
+    }
+  ],
+  "connections": [],
+  "accounts": []
+}

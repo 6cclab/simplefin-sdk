@@ -1,0 +1,88 @@
+{{ .Header }}
+
+import type {
+{{- range $t := .Types }}
+  {{ $t.TSName }},
+{{- end }}
+} from "./models.js"
+
+/*
+ * Canonical serialization exists so that every language target can be proved
+ * to parse the same fixture into the same result.
+ *
+ * The shape is deliberately not the wire format: keys are the SDK's camelCase
+ * names and every field is present, with absent values written as their zero
+ * ("" / 0 / false / null / []). Keys are sorted alphabetically to match Go's
+ * map marshalling, so two implementations that agree byte-for-byte here
+ * really did parse the fixture the same way.
+ *
+ * `extra` objects and the raw error payload are excluded: their contents are
+ * server-specific, so comparing them across languages would test the test
+ * harness rather than the parser.
+ */
+{{ range $t := .Types }}
+{{- if not $t.Root }}
+function canonical{{ $t.Name }}(v: {{ $t.TSName }}): Record<string, unknown> {
+  return {
+{{- range $f := $t.Fields }}
+{{- if $f.Canonical }}
+{{- if $f.IsRefArray }}
+    {{ quote $f.Name }}: (v.{{ $f.TSName }} ?? []).map(canonical{{ $f.Elem }}),
+{{- else if $f.IsStringArray }}
+    {{ quote $f.Name }}: v.{{ $f.TSName }} ?? [],
+{{- else if $f.IsOptionalRef }}
+    {{ quote $f.Name }}: v.{{ $f.TSName }} ?? null,
+{{- else if $f.IsEpoch }}
+    {{ quote $f.Name }}: v.{{ $f.TSName }} ?? 0,
+{{- else if eq $f.TSType "boolean" }}
+    {{ quote $f.Name }}: v.{{ $f.TSName }} ?? false,
+{{- else }}
+    {{ quote $f.Name }}: v.{{ $f.TSName }} ?? "",
+{{- end }}
+{{- end }}
+{{- end }}
+  }
+}
+{{ end }}
+{{- end }}
+{{- range $t := .Types }}
+{{- if $t.Root }}
+function canonical{{ $t.Name }}(v: {{ $t.TSName }}): Record<string, unknown> {
+  return {
+{{- range $f := $t.Fields }}
+{{- if $f.Canonical }}
+    {{ quote $f.Name }}: (v.{{ $f.TSName }} ?? []).map(canonical{{ $f.Elem }}),
+{{- end }}
+{{- end }}
+  }
+}
+
+/**
+ * Renders an {{ $t.TSName }} in the canonical cross-language form.
+ *
+ * Exported for use by the conformance tests and by anyone comparing two SDK
+ * implementations.
+ */
+export function canonicalJSON(v: {{ $t.TSName }}): string {
+  return JSON.stringify(canonical{{ $t.Name }}(v), sortKeys, 2)
+}
+{{ end }}
+{{- end }}
+
+/**
+ * A JSON.stringify replacer that emits object keys in alphabetical order,
+ * matching how Go marshals a map. Without this the two languages would
+ * produce the same data in a different order and the comparison would fail
+ * for no real reason.
+ */
+function sortKeys(_key: string, value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return value
+  }
+  const source = value as Record<string, unknown>
+  const sorted: Record<string, unknown> = {}
+  for (const k of Object.keys(source).sort()) {
+    sorted[k] = source[k]
+  }
+  return sorted
+}

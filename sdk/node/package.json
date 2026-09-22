@@ -1,0 +1,45 @@
+{
+  "name": "@andrepato/simplefin",
+  "version": "0.1.0",
+  "description": "Typed SimpleFIN protocol client, generated from the protocol specification",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/*.test.ts"
+  },
+  "keywords": [
+    "simplefin",
+    "banking",
+    "finance",
+    "transactions"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andrepato/simplefin-sdk.git",
+    "directory": "sdk/node"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^5.7.2"
+  }
+}

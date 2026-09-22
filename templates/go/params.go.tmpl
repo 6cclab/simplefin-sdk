@@ -1,0 +1,51 @@
+{{ .Header }}
+
+package {{ .Package }}
+
+import (
+	"net/url"
+	"strconv"
+)
+{{ with .GetAccounts }}
+// {{ goName .Name }}Params are the documented query parameters for
+// {{ .Method }} {{ .Path }}. The zero value requests protocol version
+// {{ $.DefaultVersion }} with no filters.
+type {{ goName .Name }}Params struct {
+{{- range $p := .Params }}
+{{ goDoc "\t" $p.GoName $p.Doc }}
+	{{ $p.GoName }} {{ $p.GoType }}
+{{- end }}
+}
+
+// Encode serializes the parameters into a query string.
+//
+// The serialization rules are not uniform and each one is load-bearing:
+// boolean flags are opt-in and sent as "1" or omitted entirely (never "0"),
+// account filters are a repeated key rather than a comma-joined list, and
+// timestamps are raw Unix seconds.
+func (p {{ goName .Name }}Params) Encode() url.Values {
+	q := url.Values{}
+{{ range $p := .Params }}
+{{- if $p.IsUnixSeconds }}
+	if p.{{ $p.GoName }} != nil {
+		q.Set({{ quote $p.Wire }}, strconv.FormatInt(*p.{{ $p.GoName }}, 10))
+	}
+{{ else if $p.IsOptInOne }}
+	if p.{{ $p.GoName }} {
+		q.Set({{ quote $p.Wire }}, "1")
+	}
+{{ else if $p.IsRepeated }}
+	for _, v := range p.{{ $p.GoName }} {
+		q.Add({{ quote $p.Wire }}, v)
+	}
+{{ else if $p.IsWithDefault }}
+	version := p.{{ $p.GoName }}
+	if version == "" {
+		version = DefaultProtocolVersion
+	}
+	q.Set({{ quote $p.Wire }}, string(version))
+{{ end }}
+{{- end }}
+	return q
+}
+{{ end }}

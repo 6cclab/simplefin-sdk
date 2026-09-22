@@ -1,0 +1,30 @@
+{
+  "accounts": [],
+  "connections": [],
+  "errlist": [
+    {
+      "accountId": "",
+      "code": "con.",
+      "connId": "CONN-1",
+      "msg": "A subcode this SDK has never met"
+    },
+    {
+      "accountId": "",
+      "code": "gen.",
+      "connId": "",
+      "msg": "Server used message instead of msg"
+    },
+    {
+      "accountId": "",
+      "code": "gen.",
+      "connId": "",
+      "msg": "Server used description instead of msg"
+    },
+    {
+      "accountId": "",
+      "code": "gen.",
+      "connId": "",
+      "msg": "{\"code\":7}"
+    }
+  ]
+}

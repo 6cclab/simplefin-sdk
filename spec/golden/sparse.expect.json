@@ -1,0 +1,28 @@
+{
+  "accounts": [
+    {
+      "availableBalance": null,
+      "balance": "0.00",
+      "balanceDate": 1757635200,
+      "connId": "CONN-1",
+      "connName": "",
+      "currency": "USD",
+      "id": "ACT-BARE",
+      "name": "Bare Minimum",
+      "transactions": []
+    },
+    {
+      "availableBalance": null,
+      "balance": "-0.01",
+      "balanceDate": 0,
+      "connId": "CONN-1",
+      "connName": "",
+      "currency": "USD",
+      "id": "ACT-NULLS",
+      "name": "Explicit Nulls",
+      "transactions": []
+    }
+  ],
+  "connections": [],
+  "errlist": []
+}

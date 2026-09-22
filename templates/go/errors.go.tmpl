@@ -1,0 +1,52 @@
+{{ .Header }}
+
+package {{ .Package }}
+
+import (
+	"errors"
+	"fmt"
+)
+
+// HTTPError is returned for any non-2xx status the protocol does not assign a
+// specific meaning to.
+//
+// Op is always a fixed literal such as "GET /accounts" and never the request
+// URL, because an Access URL embeds Basic Auth credentials and error strings
+// end up in logs.
+type HTTPError struct {
+	// Status is the HTTP status code received.
+	Status int
+	// Op names the operation that failed, as a fixed literal.
+	Op string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("{{ .Package }}: %s failed with status %d", e.Op, e.Status)
+}
+
+// Sentinel errors for the statuses the protocol assigns meaning to. Compare
+// with errors.Is.
+var (
+{{- range $s := .Statuses }}
+{{- if ne $s.Kind "ok" }}
+{{ goDoc "\t" (printf "Err%s" $s.Const) $s.Doc }}
+	Err{{ $s.Const }} = errors.New("{{ $.Package }}: {{ lower $s.Const }} ({{ $s.Code }})")
+{{- end }}
+{{- end }}
+)
+
+// statusError maps an HTTP status to an error, or nil for success.
+func statusError(status int, op string) error {
+	switch {
+	case status >= 200 && status < 300:
+		return nil
+{{- range $s := .Statuses }}
+{{- if ne $s.Kind "ok" }}
+	case status == {{ $s.Code }}:
+		return fmt.Errorf("%w (%s)", Err{{ $s.Const }}, op)
+{{- end }}
+{{- end }}
+	default:
+		return &HTTPError{Status: status, Op: op}
+	}
+}

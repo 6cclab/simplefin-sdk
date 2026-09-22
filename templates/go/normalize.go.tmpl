@@ -1,0 +1,210 @@
+{{ .Header }}
+
+package {{ .Package }}
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// rawAccountSet mirrors the wire format across both protocol versions.
+//
+// Protocol v2 sends errlist (objects) and a top-level connections array.
+// Protocol v1 sends errors (plain strings) and nests institution identity
+// inside each account as org. Both are accepted and converted into one
+// AccountSet, so callers never branch on version.
+type rawAccountSet struct {
+	Errlist     []json.RawMessage `json:"errlist"`
+	Errors      []json.RawMessage `json:"errors"`
+	Connections []Connection      `json:"connections"`
+	Accounts    []rawAccount      `json:"accounts"`
+}
+
+// rawAccount is an Account plus protocol v1's nested org object.
+type rawAccount struct {
+	Account
+	Org *OrgV1 `json:"org"`
+}
+
+// rawError matches the documented Error shape, plus the two alternate message
+// keys seen in the wild. The specification names the field msg; message and
+// description are accepted because servers have been observed using them and
+// the protocol requires that error text reach the user.
+type rawError struct {
+	Code        ErrorCode `json:"code"`
+	Msg         string    `json:"msg"`
+	Message     string    `json:"message"`
+	Description string    `json:"description"`
+	ConnID      string    `json:"conn_id"`
+	AccountID   string    `json:"account_id"`
+}
+
+// ParseAccountSet decodes a GET /accounts response body into the public
+// model, accepting either protocol version.
+//
+// Exposed so callers can parse a response they obtained some other way — a
+// cached body, a fixture, or a proxy — without going through Client.
+func ParseAccountSet(data []byte) (*AccountSet, error) {
+	var raw rawAccountSet
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("simplefin: could not decode accounts response: %w", err)
+	}
+	return normalizeAccountSet(&raw), nil
+}
+
+// normalizeAccountSet converts a decoded wire response into the public model.
+//
+{{ goDoc "" "" .NormalizationDoc }}
+func normalizeAccountSet(raw *rawAccountSet) *AccountSet {
+	set := &AccountSet{
+		Errlist:     normalizeErrors(raw),
+		Connections: raw.Connections,
+		Accounts:    make([]Account, 0, len(raw.Accounts)),
+	}
+
+	// Protocol v1 carries no connections array. Synthesize one entry per
+	// distinct org so that v1 and v2 responses present identically.
+	seen := make(map[string]bool, len(raw.Connections))
+	for _, c := range raw.Connections {
+		seen[c.ConnID] = true
+	}
+
+	for _, ra := range raw.Accounts {
+		account := ra.Account
+		if ra.Org != nil {
+			connID := deriveConnID(ra.Org)
+			if account.ConnID == "" {
+				account.ConnID = connID
+			}
+			if connID != "" && !seen[connID] {
+				seen[connID] = true
+				set.Connections = append(set.Connections, Connection{
+					ConnID:  connID,
+					Name:    orgDisplayName(ra.Org),
+					OrgID:   ra.Org.ID,
+					OrgName: ra.Org.Name,
+					OrgURL:  ra.Org.URL,
+					SfinURL: ra.Org.SfinURL,
+				})
+			}
+		}
+		set.Accounts = append(set.Accounts, account)
+	}
+
+	if set.Connections == nil {
+		set.Connections = []Connection{}
+	}
+	return set
+}
+
+// deriveConnID builds a stable connection id for a protocol v1 org, which has
+// none of its own. The fallback order is defined by the specification file so
+// every language derives the same id from the same response.
+func deriveConnID(org *OrgV1) string {
+	if org == nil {
+		return ""
+	}
+{{- range $s := .ConnIDFrom }}
+	if v := strings.TrimSpace(org.{{ $s.GoName }}); v != "" {
+		return v
+	}
+{{- end }}
+	return ""
+}
+
+// orgDisplayName picks the most human-friendly label a v1 org offers. The v1
+// specification requires either domain or name, so at least one is expected.
+func orgDisplayName(org *OrgV1) string {
+	if org == nil {
+		return ""
+	}
+	if n := strings.TrimSpace(org.Name); n != "" {
+		return n
+	}
+	return strings.TrimSpace(org.Domain)
+}
+
+// normalizeErrors flattens errlist or the deprecated errors array into
+// []Error.
+//
+// An entry may be a plain string (protocol v1) or an object (protocol v2). An
+// object without a recognizable message is preserved as its raw JSON rather
+// than rendered as an unhelpful placeholder — the protocol requires these be
+// shown to the user, so losing them defeats the point.
+func normalizeErrors(raw *rawAccountSet) []Error {
+	entries := raw.Errlist
+	if len(entries) == 0 {
+		entries = raw.Errors
+	}
+
+	out := make([]Error, 0, len(entries))
+	for _, entry := range entries {
+		// Protocol v1: a bare string with no code of its own.
+		var asString string
+		if err := json.Unmarshal(entry, &asString); err == nil {
+			out = append(out, Error{
+				Code: {{ quote .GeneralNaked }},
+				Msg:  asString,
+				Raw:  asString,
+			})
+			continue
+		}
+
+		var asObject map[string]any
+		if err := json.Unmarshal(entry, &asObject); err == nil {
+			var re rawError
+			_ = json.Unmarshal(entry, &re)
+
+			msg := firstNonEmpty(re.Msg, re.Message, re.Description)
+			if msg == "" {
+				// Never drop the text: fall back to the raw JSON. It is
+				// compacted first so the result does not depend on the
+				// server's whitespace, which also keeps this identical across
+				// language targets.
+				msg = compactJSON(entry)
+			}
+
+			code := re.Code
+			if code == "" {
+				code = {{ quote .GeneralNaked }}
+			}
+
+			out = append(out, Error{
+				Code:      code.Normalized(),
+				Msg:       msg,
+				ConnID:    re.ConnID,
+				AccountID: re.AccountID,
+				Raw:       asObject,
+			})
+			continue
+		}
+
+		out = append(out, Error{
+			Code: {{ quote .GeneralNaked }},
+			Msg:  compactJSON(entry),
+			Raw:  compactJSON(entry),
+		})
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// compactJSON strips insignificant whitespace so that a message derived from
+// an unrecognized payload does not vary with the server's formatting.
+func compactJSON(raw json.RawMessage) string {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return string(raw)
+	}
+	return buf.String()
+}

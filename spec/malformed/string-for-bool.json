@@ -1,0 +1,11 @@
+{
+  "accounts": [
+    {
+      "id": "ACT-1", "name": "Checking", "conn_id": "CONN-1", "currency": "USD",
+      "balance": "1.00", "balance-date": 1757635200,
+      "transactions": [
+        {"id": "TXN-1", "posted": 1757548800, "amount": "1.00", "description": "x", "pending": "yes"}
+      ]
+    }
+  ]
+}

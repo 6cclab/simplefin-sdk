@@ -1,0 +1,91 @@
+{{ .Header }}
+
+package {{ .Package }}
+
+import "encoding/json"
+
+// Canonical serialization exists so that every language target can be proved
+// to parse the same fixture into the same result.
+//
+// The shape is deliberately not the wire format: keys are the SDK's camelCase
+// names and every field is present, with absent values written as their zero
+// ("" / 0 / false / null / []). Go marshals maps with keys sorted
+// alphabetically, and the other language targets sort their keys to match, so
+// two implementations that agree byte-for-byte here really did parse the
+// fixture the same way.
+//
+// `extra` objects and the raw error payload are excluded: their contents are
+// server-specific, so comparing them across languages would test the test
+// harness rather than the parser.
+{{ range $t := .Types }}
+{{- if not $t.Root }}
+func canonical{{ $t.Name }}(v {{ $t.Name }}) map[string]any {
+	return map[string]any{
+{{- range $f := $t.Fields }}
+{{- if $f.Canonical }}
+{{- if $f.IsRefArray }}
+		{{ quote $f.Name }}: canonical{{ $f.Elem }}Slice(v.{{ $f.GoName }}),
+{{- else if $f.IsStringArray }}
+		{{ quote $f.Name }}: canonicalStrings(v.{{ $f.GoName }}),
+{{- else if $f.IsOptionalRef }}
+		{{ quote $f.Name }}: canonicalOptionalString(v.{{ $f.GoName }}),
+{{- else if $f.NeedsStringCast }}
+		{{ quote $f.Name }}: string(v.{{ $f.GoName }}),
+{{- else }}
+		{{ quote $f.Name }}: v.{{ $f.GoName }},
+{{- end }}
+{{- end }}
+{{- end }}
+	}
+}
+
+func canonical{{ $t.Name }}Slice(in []{{ $t.Name }}) []map[string]any {
+	out := make([]map[string]any, 0, len(in))
+	for _, v := range in {
+		out = append(out, canonical{{ $t.Name }}(v))
+	}
+	return out
+}
+{{ end }}
+{{- end }}
+{{- range $t := .Types }}
+{{- if $t.Root }}
+// canonical{{ $t.Name }} renders the root response in canonical form.
+func canonical{{ $t.Name }}(v *{{ $t.Name }}) map[string]any {
+	if v == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+{{- range $f := $t.Fields }}
+{{- if $f.Canonical }}
+		{{ quote $f.Name }}: canonical{{ $f.Elem }}Slice(v.{{ $f.GoName }}),
+{{- end }}
+{{- end }}
+	}
+}
+
+// CanonicalJSON renders an {{ $t.Name }} in the canonical cross-language form.
+// It is exported for use by the conformance tests and by anyone comparing two
+// SDK implementations.
+func CanonicalJSON(v *{{ $t.Name }}) ([]byte, error) {
+	return json.MarshalIndent(canonical{{ $t.Name }}(v), "", "  ")
+}
+{{ end }}
+{{- end }}
+
+func canonicalStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
+}
+
+// canonicalOptionalString writes an absent optional as JSON null rather than
+// an empty string, so "no available balance reported" stays distinguishable
+// from "an available balance of nothing".
+func canonicalOptionalString(in *string) any {
+	if in == nil {
+		return nil
+	}
+	return *in
+}

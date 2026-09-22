@@ -1,0 +1,98 @@
+{{ .Header }}
+
+package {{ .Package }}
+
+import "strings"
+
+// ErrorCode identifies a SimpleFIN error.
+//
+// Codes are in the format prefix.[subcode]. This is a defined string type
+// rather than a bare string so that editors offer the known codes on
+// completion, while still accepting subcodes this SDK has not seen — the
+// protocol requires consumers to tolerate unknown subcodes by falling back to
+// the naked prefix. See Normalized.
+type ErrorCode string
+
+const (
+{{- range $c := .ErrorCodes }}
+{{ goDoc "\t" $c.GoConst $c.Doc }}
+{{- if $c.HasConnID }}
+	// Carries ConnID.
+{{- end }}
+{{- if $c.HasAcctID }}
+	// Carries AccountID.
+{{- end }}
+	{{ $c.GoConst }} ErrorCode = {{ quote $c.Code }}
+{{- end }}
+)
+
+// Error code prefixes.
+const (
+{{- range $p := .NakedPrefixes }}
+	// ErrPrefix{{ pascal $p.Prefix }} marks {{ lower $p.Name }}-level errors.
+	ErrPrefix{{ pascal $p.Prefix }} = {{ quote $p.Prefix }}
+{{- end }}
+)
+
+// Prefix returns the code's prefix, so "con.auth" yields "con". An unknown
+// code still yields a usable prefix.
+func (c ErrorCode) Prefix() string {
+	if i := strings.Index(string(c), "."); i >= 0 {
+		return string(c)[:i]
+	}
+	return string(c)
+}
+
+// Known reports whether this is a code the specification defines.
+func (c ErrorCode) Known() bool {
+	switch c {
+{{- range $c := .ErrorCodes }}
+	case {{ $c.GoConst }}:
+		return true
+{{- end }}
+	}
+	return false
+}
+
+// Normalized implements the protocol's fallback rule: consumers should handle
+// unknown subcodes by treating them like the naked prefix. A known code is
+// returned unchanged; an unrecognized one degrades to its prefix, so
+// "con.somethingnew" becomes "con." and is still handled as a connection
+// error rather than being dropped.
+func (c ErrorCode) Normalized() ErrorCode {
+	if c.Known() {
+		return c
+	}
+	switch c.Prefix() {
+{{- range $p := .NakedPrefixes }}
+	case {{ quote $p.Prefix }}:
+		return {{ quote $p.Naked }}
+{{- end }}
+	}
+	return c
+}
+
+// IsAuth reports whether the code indicates an authentication problem, at
+// either the server or the connection level.
+func (c ErrorCode) IsAuth() bool {
+	switch c.Normalized() {
+	case ErrCodeGeneralAuth, ErrCodeConnectionAuth:
+		return true
+	}
+	return false
+}
+
+// ProtocolVersion is a SimpleFIN protocol version accepted by GET /accounts.
+type ProtocolVersion string
+
+const (
+{{- range $v := .SupportedVersions }}
+	// ProtocolVersion{{ $v }} selects protocol version {{ $v }}.
+	ProtocolVersion{{ $v }} ProtocolVersion = {{ quote $v }}
+{{- end }}
+
+	// DefaultProtocolVersion is sent when a caller does not choose one. The
+	// specification lets the server pick when the parameter is absent, so this
+	// SDK is explicit instead.
+	DefaultProtocolVersion = ProtocolVersion{{ .DefaultVersion }}
+)
