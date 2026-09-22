@@ -14,6 +14,7 @@ import type {
   Info,
   Currency,
   OrgV1,
+  UnknownFields,
 } from "./models.js"
 
 /*
@@ -95,6 +96,49 @@ function strList(v: unknown, path: string): string[] {
   return list(v, path).map((x, i) => str(x, `${path}[${i}]`))
 }
 
+/**
+ * Collects wire keys the specification does not define.
+ *
+ * The caller supplies the type via a parameter; nothing is validated at
+ * runtime, because the shape is the server's to decide and asserting one here
+ * would be inventing a guarantee the protocol does not make.
+ */
+function unknownFields(
+  o: Record<string, unknown>,
+  known: ReadonlySet<string>,
+): UnknownFields {
+  const out: UnknownFields = {}
+  for (const [k, v] of Object.entries(o)) {
+    if (!known.has(k)) out[k] = v
+  }
+  return out
+}
+
+const KNOWN_TRANSACTION_WIRE: ReadonlySet<string> = new Set([
+  "amount",
+  "description",
+  "extra",
+  "id",
+  "pending",
+  "posted",
+  "transacted_at",
+])
+
+const KNOWN_ACCOUNT_WIRE: ReadonlySet<string> = new Set([
+  "available-balance",
+  "balance",
+  "balance-date",
+  "conn_id",
+  "conn_name",
+  "currency",
+  "extra",
+  "id",
+  "name",
+  "org",
+  "transactions",
+])
+
+
 
 /** Parses a wire SimpleFinError into the camelCase model. */
 export function parseError(input: unknown, path = "error"): SimpleFinError {
@@ -121,7 +165,7 @@ export function parseConnection(input: unknown, path = "connection"): Connection
 }
 
 /** Parses a wire Transaction into the camelCase model. */
-export function parseTransaction(input: unknown, path = "transaction"): Transaction {
+export function parseTransaction<TransactionUnknown = UnknownFields>(input: unknown, path = "transaction"): Transaction<TransactionUnknown> {
   const o = record(input, path) ?? {}
   return {
     id: str(o["id"], `${path}.id`),
@@ -131,11 +175,12 @@ export function parseTransaction(input: unknown, path = "transaction"): Transact
     transactedAt: num(o["transacted_at"], `${path}.transactedAt`),
     pending: bool(o["pending"], `${path}.pending`),
     extra: record(o["extra"], `${path}.extra`),
+    unknown: unknownFields(o, KNOWN_TRANSACTION_WIRE) as TransactionUnknown,
   }
 }
 
 /** Parses a wire Account into the camelCase model. */
-export function parseAccount(input: unknown, path = "account"): Account {
+export function parseAccount<AccountUnknown = UnknownFields, TransactionUnknown = UnknownFields>(input: unknown, path = "account"): Account<AccountUnknown, TransactionUnknown> {
   const o = record(input, path) ?? {}
   return {
     id: str(o["id"], `${path}.id`),
@@ -146,8 +191,9 @@ export function parseAccount(input: unknown, path = "account"): Account {
     balance: str(o["balance"], `${path}.balance`),
     availableBalance: optStr(o["available-balance"], `${path}.availableBalance`),
     balanceDate: num(o["balance-date"], `${path}.balanceDate`),
-    transactions: list(o["transactions"], `${path}.transactions`).map((x, i) => parseTransaction(x, `${path}.transactions[${i}]`)),
+    transactions: list(o["transactions"], `${path}.transactions`).map((x, i) => parseTransaction<TransactionUnknown>(x, `${path}.transactions[${i}]`)),
     extra: record(o["extra"], `${path}.extra`),
+    unknown: unknownFields(o, KNOWN_ACCOUNT_WIRE) as AccountUnknown,
   }
 }
 
@@ -276,20 +322,22 @@ export function normalizeErrors(input: unknown): SimpleFinError[] {
  * plain strings is folded into errlist entries whose code is the naked
  * general prefix and whose msg is the string itself.
  */
-export function normalizeAccountSet(input: unknown): AccountSet {
+export function normalizeAccountSet<AccountUnknown = UnknownFields, TransactionUnknown = UnknownFields>(
+  input: unknown,
+): AccountSet<AccountUnknown, TransactionUnknown> {
   const o = record(input, "response") ?? {}
 
   const connections = list(o["connections"], "connections").map((c, i) =>
     parseConnection(c, `connections[${i}]`),
   )
-  const accounts: Account[] = []
+  const accounts: Account<AccountUnknown, TransactionUnknown>[] = []
 
   // Protocol v1 carries no connections array. Synthesize one entry per
   // distinct org so that v1 and v2 responses present identically.
   const seen = new Set(connections.map((c) => c.connId))
 
   for (const [i, rawAccount] of list(o["accounts"], "accounts").entries()) {
-    const account = parseAccount(rawAccount, `accounts[${i}]`)
+    const account = parseAccount<AccountUnknown, TransactionUnknown>(rawAccount, `accounts[${i}]`)
     const orgRaw = isRecord(rawAccount) ? rawAccount["org"] : undefined
 
     if (isRecord(orgRaw)) {

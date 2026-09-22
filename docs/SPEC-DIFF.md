@@ -78,6 +78,94 @@ only a display string cannot distinguish them without matching on prose.
 
 ---
 
+## found by this project, fixed here
+
+Not predecessor bugs. These surfaced while building the cross-language check and while running
+against a real bridge — neither is visible from reading the specification alone.
+
+### 5. TypeScript coerced wrong-typed fields; Go rejected them
+
+Not a predecessor bug — a divergence found *inside this project*, while building the
+cross-language check, and worth recording because it is the kind of thing that only surfaces when
+two implementations are compared directly.
+
+go-bt and the Go target use `encoding/json`, which **rejects** a payload where a field has the
+wrong type: `"balance": 12.5` fails the whole response. The first draft of this SDK's TypeScript
+parser was written defensively and **coerced** the same payload, yielding `balance: ""`.
+
+Both are defensible in isolation. Together they are not: the same fixture produced an error in one
+language and a silently wrong balance in the other.
+
+**Resolved toward strictness**, in both languages, matching `encoding/json` exactly:
+
+- a missing field, or an explicit `null`, yields the zero value
+- a field present with the wrong type is an error
+
+The deciding argument is money. A server sending the number `12.5` where the protocol documents a
+string is broken, and a client that quietly renders that as an empty balance is more dangerous than
+one that refuses the response. The TypeScript side throws `SimpleFinParseError` naming the field
+path, so the caller can report the problem upstream rather than guessing.
+
+`spec/malformed/` holds the payloads both targets must reject; `spec/golden/sparse.json` holds the
+absent-and-null cases both must accept, so a parser that rejected everything could not pass.
+
+### 6. Undocumented wire fields were silently dropped
+
+Found by running against the real `beta-bridge.simplefin.org`, not against fixtures — no amount
+of spec reading would have surfaced it. Every response carries fields the specification never
+defines, and they are *not* inside `extra`; they sit at the top level of each object, so the
+documented `extra` escape hatch does not catch them.
+
+Measured over one live response (25 accounts, 142 transactions):
+
+| Field | Present on | Actually populated |
+| --- | --- | --- |
+| `holdings` (account) | 25/25 | **5** — the investment accounts; the other 20 send `[]` |
+| `payee` (transaction) | 142/142 | **142** |
+| `memo` (transaction) | 142/142 | 4 |
+| `mcc` (transaction) | 142/142 | 1, from a single institution |
+
+`payee` is the valuable one: fully populated and cleaner than parsing `description`. `mcc` looked
+promising as a categorization signal but is populated on one transaction out of 142, so it is not
+something to build on.
+
+Both predecessors discard all of this, and so did the first cut of this SDK.
+
+**Fixed here** with a generic capture rather than typed fields. Each capturing type retains any
+wire key the spec does not define, and the caller supplies the shape:
+
+```go
+holdings, ok := simplefin.Field[[]Holding](account.Unknown, "holdings")
+```
+
+```ts
+const set = await client.getAccounts<{ holdings: Holding[] }, { payee: string }>()
+set.accounts[0].unknown.holdings              // typed, completes
+set.accounts[0].transactions?.[0]?.unknown.payee
+```
+
+Two properties this buys, both tested: the data separates itself by account kind without the SDK
+inventing an account-type concept (empty `holdings` stays empty, populated stays populated), and
+anything the bridge adds later is captured with no SDK change.
+
+`org` is explicitly excluded from the bucket on Account, because the v1 normalizer already
+consumes it — reporting it as an undocumented extra would be duplication, not discovery.
+
+One Go hazard worth recording: giving `Account` an `UnmarshalJSON` promotes that method to any
+struct embedding it, which silently took over decoding in `rawAccount` and left `Org` nil on every
+v1 response. No error, just missing institutions. `rawAccount` now holds `Account` as a named
+field with its own unmarshaller.
+
+### 7. `GET /info` is not trustworthy
+
+`beta-bridge.simplefin.org` reports `{"versions":["1.0"]}` while happily serving a full v2
+response when asked for `version=2`. The production bridge is worse: `/simplefin/info`
+302-redirects to the marketing homepage rather than returning JSON.
+
+The endpoint is implemented to spec, but it cannot be used to decide which version to request.
+This is why the v1 normalizer is in scope rather than gated behind a version probe.
+---
+
 ## protocol — agreed with the predecessors, kept
 
 These were already right, and the generated SDK reproduces them deliberately rather than by
@@ -116,34 +204,6 @@ silently rewrites amounts or invents fields the wire never sent is surprising an
 | `inferAccountType` | Keyword table over the account name | SimpleFIN has no account-category field. Same reasoning |
 | Orphan-account synthesis | Invents a `Connection` when an account's `conn_id` matches none | Genuinely useful, but it is a domain decision about whether to drop or keep the account. Note the v1 normalizer here *does* synthesize connections — that is different: v1 legitimately has no connections array, so building one is parsing, not guessing |
 | Currency defaulting to `"USD"` when empty | Fills a blank currency | Guessing a currency is a decision with financial consequences |
-
----
-
-### 5. TypeScript coerced wrong-typed fields; Go rejected them
-
-Not a predecessor bug — a divergence found *inside this project*, while building the
-cross-language check, and worth recording because it is the kind of thing that only surfaces when
-two implementations are compared directly.
-
-go-bt and the Go target use `encoding/json`, which **rejects** a payload where a field has the
-wrong type: `"balance": 12.5` fails the whole response. The first draft of this SDK's TypeScript
-parser was written defensively and **coerced** the same payload, yielding `balance: ""`.
-
-Both are defensible in isolation. Together they are not: the same fixture produced an error in one
-language and a silently wrong balance in the other.
-
-**Resolved toward strictness**, in both languages, matching `encoding/json` exactly:
-
-- a missing field, or an explicit `null`, yields the zero value
-- a field present with the wrong type is an error
-
-The deciding argument is money. A server sending the number `12.5` where the protocol documents a
-string is broken, and a client that quietly renders that as an empty balance is more dangerous than
-one that refuses the response. The TypeScript side throws `SimpleFinParseError` naming the field
-path, so the caller can report the problem upstream rather than guessing.
-
-`spec/malformed/` holds the payloads both targets must reject; `spec/golden/sparse.json` holds the
-absent-and-null cases both must accept, so a parser that rejected everything could not pass.
 
 ---
 

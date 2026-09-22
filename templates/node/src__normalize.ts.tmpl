@@ -8,6 +8,7 @@ import type {
 {{- range $t := .V1Types }}
   {{ $t.TSName }},
 {{- end }}
+  UnknownFields,
 } from "./models.js"
 
 /*
@@ -89,16 +90,43 @@ function strList(v: unknown, path: string): string[] {
   return list(v, path).map((x, i) => str(x, `${path}[${i}]`))
 }
 
+/**
+ * Collects wire keys the specification does not define.
+ *
+ * The caller supplies the type via a parameter; nothing is validated at
+ * runtime, because the shape is the server's to decide and asserting one here
+ * would be inventing a guarantee the protocol does not make.
+ */
+function unknownFields(
+  o: Record<string, unknown>,
+  known: ReadonlySet<string>,
+): UnknownFields {
+  const out: UnknownFields = {}
+  for (const [k, v] of Object.entries(o)) {
+    if (!known.has(k)) out[k] = v
+  }
+  return out
+}
+{{ range $t := .Types }}
+{{- if $t.CaptureUnknown }}
+const KNOWN_{{ upper $t.Name }}_WIRE: ReadonlySet<string> = new Set([
+{{- range $w := $t.KnownWire }}
+  {{ quote $w }},
+{{- end }}
+])
+{{ end }}
+{{- end }}
+
 {{ range $t := .Types }}
 {{- if not $t.Root }}
 /** Parses a wire {{ $t.TSName }} into the camelCase model. */
-export function parse{{ $t.Name }}(input: unknown, path = "{{ lower $t.Name }}"): {{ $t.TSName }} {
+export function parse{{ $t.Name }}{{ $t.TSGenerics }}(input: unknown, path = "{{ lower $t.Name }}"): {{ $t.TSName }}{{ $t.TSArgs }} {
   const o = record(input, path) ?? {}
   return {
 {{- range $f := $t.Fields }}
 {{- if not $f.Synthetic }}
 {{- if $f.IsRefArray }}
-    {{ $f.TSName }}: list(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`).map((x, i) => parse{{ $f.Elem }}(x, `${path}.{{ $f.Name }}[${i}]`)),
+    {{ $f.TSName }}: list(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`).map((x, i) => parse{{ $f.Elem }}{{ tsArgsFor $f.Elem }}(x, `${path}.{{ $f.Name }}[${i}]`)),
 {{- else if $f.IsStringArray }}
     {{ $f.TSName }}: strList(o[{{ quote $f.Wire }}], `${path}.{{ $f.Name }}`),
 {{- else if $f.IsEpoch }}
@@ -120,13 +148,16 @@ export function parse{{ $t.Name }}(input: unknown, path = "{{ lower $t.Name }}")
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if $t.CaptureUnknown }}
+    unknown: unknownFields(o, KNOWN_{{ upper $t.Name }}_WIRE) as {{ unknownParam $t.Name }},
+{{- end }}
   }
 }
 {{ end }}
 {{- end }}
 {{- range $t := .V1Types }}
 /** Parses a protocol v1 {{ $t.Name }}. */
-export function parse{{ $t.Name }}(input: unknown, path = "{{ lower $t.Name }}"): {{ $t.TSName }} {
+export function parse{{ $t.Name }}{{ $t.TSGenerics }}(input: unknown, path = "{{ lower $t.Name }}"): {{ $t.TSName }}{{ $t.TSArgs }} {
   const o = record(input, path) ?? {}
   return {
 {{- range $f := $t.Fields }}
@@ -227,20 +258,22 @@ export function normalizeErrors(input: unknown): SimpleFinError[] {
  *
 {{ tsDocBody " * " .NormalizationDoc }}
  */
-export function normalizeAccountSet(input: unknown): AccountSet {
+export function normalizeAccountSet<AccountUnknown = UnknownFields, TransactionUnknown = UnknownFields>(
+  input: unknown,
+): AccountSet<AccountUnknown, TransactionUnknown> {
   const o = record(input, "response") ?? {}
 
   const connections = list(o["connections"], "connections").map((c, i) =>
     parseConnection(c, `connections[${i}]`),
   )
-  const accounts: Account[] = []
+  const accounts: Account<AccountUnknown, TransactionUnknown>[] = []
 
   // Protocol v1 carries no connections array. Synthesize one entry per
   // distinct org so that v1 and v2 responses present identically.
   const seen = new Set(connections.map((c) => c.connId))
 
   for (const [i, rawAccount] of list(o["accounts"], "accounts").entries()) {
-    const account = parseAccount(rawAccount, `accounts[${i}]`)
+    const account = parseAccount<AccountUnknown, TransactionUnknown>(rawAccount, `accounts[${i}]`)
     const orgRaw = isRecord(rawAccount) ? rawAccount["org"] : undefined
 
     if (isRecord(orgRaw)) {

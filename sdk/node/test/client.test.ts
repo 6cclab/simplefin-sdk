@@ -283,18 +283,18 @@ test("postedTime falls back to transactedAt for pending transactions", () => {
   const cases: Array<{ name: string; tx: Transaction; want: number | null }> = [
     {
       name: "posted wins",
-      tx: { id: "1", posted: 1757548800, transactedAt: 1757462400, amount: "0", description: "" },
+      tx: { id: "1", posted: 1757548800, transactedAt: 1757462400, amount: "0", description: "", unknown: {} },
       want: 1757548800,
     },
     {
       name: "pending falls back to transactedAt",
-      tx: { id: "2", posted: 0, transactedAt: 1757462400, amount: "0", description: "" },
+      tx: { id: "2", posted: 0, transactedAt: 1757462400, amount: "0", description: "", unknown: {} },
       want: 1757462400,
     },
-    { name: "neither set is null", tx: { id: "3", posted: 0, amount: "0", description: "" }, want: null },
+    { name: "neither set is null", tx: { id: "3", posted: 0, amount: "0", description: "", unknown: {} }, want: null },
     {
       name: "negative is treated as absent",
-      tx: { id: "4", posted: -1, amount: "0", description: "" },
+      tx: { id: "4", posted: -1, amount: "0", description: "", unknown: {} },
       want: null,
     },
   ]

@@ -12,7 +12,7 @@
  */
 
 import { statusError } from "./errors.js"
-import type { AccountSet, Currency, Info } from "./models.js"
+import type { AccountSet, Currency, Info, UnknownFields } from "./models.js"
 import { normalizeAccountSet } from "./normalize.js"
 import { encodeGetAccountsParams, type GetAccountsParams } from "./params.js"
 
@@ -36,8 +36,24 @@ export interface SimpleFinClient {
    * them by default. A 403 means authentication failed or access was revoked —
    * SimpleFIN auth is all-or-nothing per Access URL, so it is the signal to
    * re-claim the whole Access URL rather than relink a single connection.
+   *
+   * The type parameters describe wire keys the specification does not define,
+   * which real servers do send. Supply them once here and they reach every
+   * account and nested transaction:
+   *
+   * ```ts
+   * const set = await client.getAccounts<
+   *   { holdings: Holding[] },
+   *   { payee: string; memo: string; mcc: string }
+   * >({ pending: true })
+   *
+   * set.accounts[0].unknown.holdings          // typed
+   * set.accounts[0].transactions?.[0]?.unknown.payee  // typed
+   * ```
    */
-  getAccounts(params?: GetAccountsParams): Promise<AccountSet>
+  getAccounts<AccountUnknown = UnknownFields, TransactionUnknown = UnknownFields>(
+    params?: GetAccountsParams,
+  ): Promise<AccountSet<AccountUnknown, TransactionUnknown>>
 
   /**
    * Reports which protocol versions the server supports.
@@ -147,10 +163,12 @@ export function createClient(
   }
 
   return {
-    async getAccounts(params: GetAccountsParams = {}): Promise<AccountSet> {
+    async getAccounts<AccountUnknown = UnknownFields, TransactionUnknown = UnknownFields>(
+      params: GetAccountsParams = {},
+    ): Promise<AccountSet<AccountUnknown, TransactionUnknown>> {
       const query = encodeGetAccountsParams(params).toString()
       const raw = await getJson(`${baseUrl}/accounts?${query}`, "GET /accounts", true)
-      return normalizeAccountSet(raw)
+      return normalizeAccountSet<AccountUnknown, TransactionUnknown>(raw)
     },
 
     async info(): Promise<Info> {

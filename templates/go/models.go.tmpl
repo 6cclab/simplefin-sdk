@@ -2,7 +2,10 @@
 
 package {{ .Package }}
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 {{ range $t := .Types }}
 {{ goDoc "" $t.Name $t.Doc }}
 type {{ $t.Name }} struct {
@@ -18,7 +21,50 @@ type {{ $t.Name }} struct {
 {{- end }}
 	{{ $f.GoName }} {{ $f.GoType }} {{ $f.GoTag }}
 {{- end }}
+{{- if $t.CaptureUnknown }}
+
+	// Unknown holds wire keys this specification does not define, exactly as
+	// the server sent them.
+	//
+	// SimpleFIN servers send fields the protocol never documented — the
+	// Bridge attaches holdings to every account and payee, memo and mcc to
+	// every transaction. Discarding them silently would lose real data, but
+	// promoting them to typed fields would assert a shape the specification
+	// does not guarantee. They are kept here instead, so nothing is lost and
+	// nothing is invented. Use Field to read one with a type.
+	Unknown map[string]json.RawMessage `json:"-"`
+{{- end }}
 }
+{{- if $t.CaptureUnknown }}
+
+// UnmarshalJSON decodes a {{ $t.Name }}, retaining any wire key this
+// specification does not define in Unknown.
+func ({{ $t.Recv }} *{{ $t.Name }}) UnmarshalJSON(data []byte) error {
+	// The alias sheds this method, so the embedded decode does not recurse.
+	type alias {{ $t.Name }}
+	var base alias
+	if err := json.Unmarshal(data, &base); err != nil {
+		return err
+	}
+	*{{ $t.Recv }} = {{ $t.Name }}(base)
+
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	for _, known := range []string{
+{{- range $w := $t.KnownWire }}
+		{{ quote $w }},
+{{- end }}
+	} {
+		delete(all, known)
+	}
+	if len(all) > 0 {
+		{{ $t.Recv }}.Unknown = all
+	}
+	return nil
+}
+{{- end }}
 {{ range $a := $t.Accessors }}
 {{ goDoc "" $a.GoName $a.Doc }}
 func ({{ $t.Recv }} {{ $t.Name }}) {{ $a.GoName }}() *time.Time {
@@ -43,6 +89,26 @@ type {{ $t.Name }} struct {
 {{- end }}
 }
 {{ end }}
+// Field reads a value out of an Unknown map and decodes it into T.
+//
+// It reports false when the key is absent or the value does not fit T, so an
+// undocumented field that changes shape degrades to "not present" rather than
+// failing the whole response.
+//
+//	holdings, ok := simplefin.Field[[]Holding](account.Unknown, "holdings")
+//	payee, ok := simplefin.Field[string](tx.Unknown, "payee")
+func Field[T any](unknown map[string]json.RawMessage, key string) (T, bool) {
+	var out T
+	raw, ok := unknown[key]
+	if !ok {
+		return out, false
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, false
+	}
+	return out, true
+}
+
 // epochToTime converts Unix seconds to a time, treating zero and negative
 // values as absent. Every caller must agree on that rule — a bare zero check
 // in one place and a > 0 check in another is how pending transactions end up

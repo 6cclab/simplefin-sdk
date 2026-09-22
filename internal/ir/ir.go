@@ -69,6 +69,19 @@ type Type struct {
 	Root      bool       `yaml:"root"`
 	Fields    []Field    `yaml:"fields"`
 	Accessors []Accessor `yaml:"accessors"`
+
+	// CaptureUnknown makes the type retain any wire key the specification
+	// does not define, instead of discarding it.
+	//
+	// This is not hypothetical tidiness: the SimpleFIN Bridge sends holdings
+	// on every account and payee/memo/mcc on every transaction, none of which
+	// appear in the specification. Dropping them silently is the same failure
+	// mode as dropping v1 institution data.
+	CaptureUnknown bool `yaml:"captureUnknown"`
+
+	// UnknownExclude lists wire keys that must NOT land in the unknown bucket
+	// because another part of the model already consumes them.
+	UnknownExclude []string `yaml:"unknownExclude"`
 }
 
 // Protocol carries top-level metadata about the specification itself.

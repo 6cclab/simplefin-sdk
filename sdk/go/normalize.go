@@ -25,9 +25,30 @@ type rawAccountSet struct {
 }
 
 // rawAccount is an Account plus protocol v1's nested org object.
+//
+// Account is a named field rather than an embedded one on purpose. Account
+// defines UnmarshalJSON (to capture undocumented wire keys), and an embedded
+// type's UnmarshalJSON is promoted to the outer struct — which would quietly
+// take over decoding here and leave Org nil on every v1 response. That failure
+// is invisible: no error, just missing institutions.
 type rawAccount struct {
-	Account
-	Org *OrgV1 `json:"org"`
+	Account Account
+	Org     *OrgV1
+}
+
+// UnmarshalJSON decodes the account body and the v1 org from the same object.
+func (r *rawAccount) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, &r.Account); err != nil {
+		return err
+	}
+	var probe struct {
+		Org *OrgV1 `json:"org"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return err
+	}
+	r.Org = probe.Org
+	return nil
 }
 
 // rawError matches the documented Error shape, plus the two alternate message

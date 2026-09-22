@@ -1,9 +1,26 @@
 {{ .Header }}
 
 import type { ErrorCode } from "./errorcodes.js"
+
+/**
+ * The default shape for wire keys the specification does not define.
+ *
+ * SimpleFIN servers send fields the protocol never documented — the Bridge
+ * attaches `holdings` to every account and `payee`, `memo` and `mcc` to every
+ * transaction. Discarding them would lose real data; promoting them to typed
+ * fields would assert a shape the specification does not guarantee. They are
+ * captured here instead, and you supply the type:
+ *
+ * ```ts
+ * type Holding = { symbol: string; shares: string }
+ * const set = await client.getAccounts<{ holdings: Holding[] }>()
+ * set.accounts[0].unknown.holdings   // typed, completes
+ * ```
+ */
+export type UnknownFields = Record<string, unknown>
 {{ range $t := .Types }}
 {{ tsDoc "" $t.Doc }}
-export interface {{ $t.TSName }} {
+export interface {{ $t.TSName }}{{ $t.TSGenerics }} {
 {{- range $f := $t.Fields }}
 {{- if $f.IsMoney }}
 {{ tsDocRemark "  " $f.Doc "Numeric string as sent by the server. Never parse as a float — SimpleFIN transmits amounts as strings precisely to avoid that precision loss." }}
@@ -14,11 +31,18 @@ export interface {{ $t.TSName }} {
 {{- end }}
   {{ $f.TSName }}{{ if $f.Optional }}?{{ end }}: {{ $f.TSType }}
 {{- end }}
+{{- if $t.CaptureUnknown }}
+  /**
+   * Wire keys this specification does not define, exactly as the server sent
+   * them. See {@link UnknownFields}.
+   */
+  unknown: {{ unknownParam $t.Name }}
+{{- end }}
 }
 {{ end }}
 {{- range $t := .V1Types }}
 {{ tsDoc "" $t.Doc }}
-export interface {{ $t.TSName }} {
+export interface {{ $t.TSName }}{{ $t.TSGenerics }} {
 {{- range $f := $t.Fields }}
 {{ tsDoc "  " $f.Doc }}
   {{ $f.TSName }}{{ if $f.Optional }}?{{ end }}: {{ $f.TSType }}

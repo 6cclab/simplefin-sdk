@@ -2,6 +2,7 @@ package gen
 
 import (
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/6cclab/simplefin-sdk/internal/ir"
@@ -61,7 +62,30 @@ type TypeView struct {
 	Fields    []FieldView
 	Accessors []AccessorView
 	Root      bool
+
+	// CaptureUnknown makes the type retain wire keys the spec does not define.
+	CaptureUnknown bool
+	// KnownWire is every wire key the type consumes, so a generated
+	// unmarshaller knows what is left over.
+	KnownWire []string
+
+	// UnknownParams are the TypeScript type parameters this type needs, in
+	// order: its own if it captures unknown keys, plus those of every type it
+	// contains. Threading them lets a caller describe the undocumented shape
+	// once at the call site and have it reach nested transactions, instead of
+	// casting at each use.
+	UnknownParams []string
+	// TSGenerics renders the parameter list with defaults, e.g.
+	// "<AccountUnknown = UnknownFields>". Empty when the type needs none.
+	TSGenerics string
+	// TSArgs renders the same parameters as arguments, e.g.
+	// "<AccountUnknown>". Empty when the type needs none.
+	TSArgs string
 }
+
+// unknownParamName is the TypeScript type parameter introduced by a capturing
+// type, e.g. Transaction -> TransactionUnknown.
+func unknownParamName(typeName string) string { return typeName + "Unknown" }
 
 // FieldView is one generated field.
 type FieldView struct {
@@ -222,6 +246,8 @@ func BuildView(spec *ir.Spec, lang, pkg, header string) *View {
 		v.PrefixLiterals = append(v.PrefixLiterals, p.Prefix)
 	}
 
+	resolveUnknownParams(v.Types)
+
 	v.NormalizationDoc = spec.Normalization.Doc
 	v.GeneralNaked = nakedByPrefix["gen"]
 	for _, c := range v.ErrorCodes {
@@ -249,17 +275,114 @@ func BuildView(spec *ir.Spec, lang, pkg, header string) *View {
 	return v
 }
 
+// resolveUnknownParams walks each type's fields and collects the type
+// parameters it must carry, including those of the types it contains.
+//
+// A single pass is enough for this protocol: Account contains Transaction and
+// AccountSet contains both, so a second pass would find nothing new. A deeper
+// model would need to iterate to a fixed point.
+func resolveUnknownParams(types []TypeView) {
+	own := map[string][]string{}
+	for _, t := range types {
+		if t.CaptureUnknown {
+			own[t.Name] = []string{unknownParamName(t.Name)}
+		}
+	}
+
+	// Two passes so a container picks up parameters from a type declared
+	// after it.
+	for pass := 0; pass < 2; pass++ {
+		for i := range types {
+			t := &types[i]
+			seen := map[string]bool{}
+			var params []string
+			add := func(names []string) {
+				for _, n := range names {
+					if !seen[n] {
+						seen[n] = true
+						params = append(params, n)
+					}
+				}
+			}
+			add(own[t.Name])
+			for _, f := range t.Fields {
+				if f.Elem == "" {
+					continue
+				}
+				add(own[f.Elem])
+				for _, other := range types {
+					if other.Name == f.Elem {
+						add(other.UnknownParams)
+					}
+				}
+			}
+			t.UnknownParams = params
+			t.TSGenerics, t.TSArgs = renderGenerics(params)
+		}
+	}
+
+	// Now that every type knows its parameters, a field referring to one must
+	// pass them along: Account.transactions is Transaction<TransactionUnknown>[],
+	// not a bare Transaction[], or the caller's shape stops at the boundary.
+	argsFor := map[string]string{}
+	for _, t := range types {
+		argsFor[t.Name] = t.TSArgs
+	}
+	tsArgsIndex = argsFor
+	for i := range types {
+		for j := range types[i].Fields {
+			f := &types[i].Fields[j]
+			args, ok := argsFor[f.Elem]
+			if !ok || args == "" {
+				continue
+			}
+			switch f.Kind {
+			case ir.KindArrayRef:
+				f.TSType = TSTypeName(f.Elem) + args + "[]"
+			case ir.KindRef:
+				f.TSType = TSTypeName(f.Elem) + args
+			}
+		}
+	}
+}
+
+// tsArgsIndex lets templates ask for a type's generic arguments by name.
+var tsArgsIndex = map[string]string{}
+
+// TSArgsFor returns the generic argument list for a type, e.g. "<TransactionUnknown>".
+func TSArgsFor(typeName string) string { return tsArgsIndex[typeName] }
+
+func renderGenerics(params []string) (generics, args string) {
+	if len(params) == 0 {
+		return "", ""
+	}
+	withDefaults := make([]string, 0, len(params))
+	for _, p := range params {
+		withDefaults = append(withDefaults, p+" = UnknownFields")
+	}
+	return "<" + strings.Join(withDefaults, ", ") + ">", "<" + strings.Join(params, ", ") + ">"
+}
+
 func buildType(t ir.Type) TypeView {
 	tv := TypeView{
-		Name:   t.Name,
-		TSName: TSTypeName(t.Name),
-		Doc:    t.Doc,
-		Recv:   receiverFor(t.Name),
-		Root:   t.Root,
+		Name:           t.Name,
+		TSName:         TSTypeName(t.Name),
+		Doc:            t.Doc,
+		Recv:           receiverFor(t.Name),
+		Root:           t.Root,
+		CaptureUnknown: t.CaptureUnknown,
 	}
 	for _, f := range t.Fields {
 		tv.Fields = append(tv.Fields, buildField(f))
+		if f.Wire != "" && !f.Synthetic {
+			tv.KnownWire = append(tv.KnownWire, f.Wire)
+		}
 	}
+	// Keys another part of the model already consumes must not also surface as
+	// "unknown" -- `org` is read by the v1 normalizer, so reporting it as an
+	// undocumented extra would be duplication, not discovery.
+	tv.KnownWire = append(tv.KnownWire, t.UnknownExclude...)
+	sort.Strings(tv.KnownWire)
 	for _, a := range t.Accessors {
 		av := AccessorView{
 			Name:   a.Name,

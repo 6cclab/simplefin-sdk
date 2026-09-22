@@ -66,6 +66,11 @@ stylistic.
    third-party.
 7. **Claim is one-shot.** The server consumes the token whether or not you store the result. Never
    retry with the same token.
+8. **Never drop an undocumented field.** Real servers send keys the specification does not define —
+   the Bridge attaches `holdings` to every account and `payee`/`memo`/`mcc` to every transaction,
+   outside `extra`. Types marked `captureUnknown` in the spec must retain them, keyed by wire name,
+   with the caller supplying the type. Keys listed in `unknownExclude` are consumed elsewhere and
+   must stay out of the bucket.
 
 ## Passing
 

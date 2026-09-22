@@ -7,6 +7,23 @@
 import type { ErrorCode } from "./errorcodes.js"
 
 /**
+ * The default shape for wire keys the specification does not define.
+ *
+ * SimpleFIN servers send fields the protocol never documented — the Bridge
+ * attaches `holdings` to every account and `payee`, `memo` and `mcc` to every
+ * transaction. Discarding them would lose real data; promoting them to typed
+ * fields would assert a shape the specification does not guarantee. They are
+ * captured here instead, and you supply the type:
+ *
+ * ```ts
+ * type Holding = { symbol: string; shares: string }
+ * const set = await client.getAccounts<{ holdings: Holding[] }>()
+ * set.accounts[0].unknown.holdings   // typed, completes
+ * ```
+ */
+export type UnknownFields = Record<string, unknown>
+
+/**
  * A structured error from the Account Set's errlist. The protocol requires
  * that these be displayed to the user, and that all strings be sanitized
  * before display.
@@ -78,7 +95,7 @@ export interface Connection {
 /**
  * A single transaction within an Account.
  */
-export interface Transaction {
+export interface Transaction<TransactionUnknown = UnknownFields> {
   /**
    * An ID that uniquely describes a transaction within an Account. An
    * organization may reuse transaction ids for different accounts, but may
@@ -125,6 +142,11 @@ export interface Transaction {
    * to the Server to decide whether or not to include data in here.
    */
   extra?: Record<string, unknown>
+  /**
+   * Wire keys this specification does not define, exactly as the server sent
+   * them. See {@link UnknownFields}.
+   */
+  unknown: TransactionUnknown
 }
 
 /**
@@ -132,7 +154,7 @@ export interface Transaction {
  * its Connection, never globally — callers keying storage on `id` alone
  * will collide across institutions.
  */
-export interface Account {
+export interface Account<AccountUnknown = UnknownFields, TransactionUnknown = UnknownFields> {
   /**
    * String that uniquely identifies the account within the Connection. It is
    * recommended that this id be chosen such that it does not reveal any
@@ -192,19 +214,24 @@ export interface Account {
   /**
    * List of a subset of Transactions for this account, ordered by posted.
    */
-  transactions?: Transaction[]
+  transactions?: Transaction<TransactionUnknown>[]
   /**
    * This optional attribute may be used to include extra account-specific
    * data that is not defined in this standard. It is up to the Server to
    * decide whether or not to include data in here.
    */
   extra?: Record<string, unknown>
+  /**
+   * Wire keys this specification does not define, exactly as the server sent
+   * them. See {@link UnknownFields}.
+   */
+  unknown: AccountUnknown
 }
 
 /**
  * The GET /accounts response.
  */
-export interface AccountSet {
+export interface AccountSet<AccountUnknown = UnknownFields, TransactionUnknown = UnknownFields> {
   /**
    * List of errors.
    */
@@ -217,7 +244,7 @@ export interface AccountSet {
   /**
    * List of Accounts.
    */
-  accounts: Account[]
+  accounts: Account<AccountUnknown, TransactionUnknown>[]
 }
 
 /**

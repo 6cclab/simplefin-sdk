@@ -128,6 +128,9 @@ types:
 
   - name: Transaction
     doc: A single transaction within an Account.
+    # The Bridge sends payee, memo and mcc on every transaction; none are in
+    # the specification. Capture rather than discard them.
+    captureUnknown: true
     fields:
       - name: id
         wire: id
@@ -196,6 +199,11 @@ types:
       One account within a Connection. Note that `id` is unique only within its
       Connection, never globally — callers keying storage on `id` alone will
       collide across institutions.
+    # The Bridge sends holdings on every account (populated on investment
+    # accounts, empty elsewhere); it is not in the specification. `org` is
+    # excluded because the v1 normalizer already consumes it.
+    captureUnknown: true
+    unknownExclude: [org]
     fields:
       - name: id
         wire: id

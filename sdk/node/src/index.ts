@@ -45,6 +45,7 @@ export {
   type OrgV1,
   type SimpleFinError,
   type Transaction,
+  type UnknownFields,
 } from "./models.js"
 export {
   normalizeAccountSet,

@@ -4,7 +4,10 @@
 
 package simplefin
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Error A structured error from the Account Set's errlist. The protocol
 // requires that these be displayed to the user, and that all strings be
@@ -78,6 +81,49 @@ type Transaction struct {
 	// transaction-specific data that is not defined in this standard. It is up
 	// to the Server to decide whether or not to include data in here.
 	Extra map[string]any `json:"extra,omitempty"`
+
+	// Unknown holds wire keys this specification does not define, exactly as
+	// the server sent them.
+	//
+	// SimpleFIN servers send fields the protocol never documented — the
+	// Bridge attaches holdings to every account and payee, memo and mcc to
+	// every transaction. Discarding them silently would lose real data, but
+	// promoting them to typed fields would assert a shape the specification
+	// does not guarantee. They are kept here instead, so nothing is lost and
+	// nothing is invented. Use Field to read one with a type.
+	Unknown map[string]json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON decodes a Transaction, retaining any wire key this
+// specification does not define in Unknown.
+func (t *Transaction) UnmarshalJSON(data []byte) error {
+	// The alias sheds this method, so the embedded decode does not recurse.
+	type alias Transaction
+	var base alias
+	if err := json.Unmarshal(data, &base); err != nil {
+		return err
+	}
+	*t = Transaction(base)
+
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	for _, known := range []string{
+		"amount",
+		"description",
+		"extra",
+		"id",
+		"pending",
+		"posted",
+		"transacted_at",
+	} {
+		delete(all, known)
+	}
+	if len(all) > 0 {
+		t.Unknown = all
+	}
+	return nil
 }
 
 // PostedTime The transaction's effective date. posted is 0 while a
@@ -141,6 +187,53 @@ type Account struct {
 	// account-specific data that is not defined in this standard. It is up to
 	// the Server to decide whether or not to include data in here.
 	Extra map[string]any `json:"extra,omitempty"`
+
+	// Unknown holds wire keys this specification does not define, exactly as
+	// the server sent them.
+	//
+	// SimpleFIN servers send fields the protocol never documented — the
+	// Bridge attaches holdings to every account and payee, memo and mcc to
+	// every transaction. Discarding them silently would lose real data, but
+	// promoting them to typed fields would assert a shape the specification
+	// does not guarantee. They are kept here instead, so nothing is lost and
+	// nothing is invented. Use Field to read one with a type.
+	Unknown map[string]json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON decodes a Account, retaining any wire key this
+// specification does not define in Unknown.
+func (a *Account) UnmarshalJSON(data []byte) error {
+	// The alias sheds this method, so the embedded decode does not recurse.
+	type alias Account
+	var base alias
+	if err := json.Unmarshal(data, &base); err != nil {
+		return err
+	}
+	*a = Account(base)
+
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	for _, known := range []string{
+		"available-balance",
+		"balance",
+		"balance-date",
+		"conn_id",
+		"conn_name",
+		"currency",
+		"extra",
+		"id",
+		"name",
+		"org",
+		"transactions",
+	} {
+		delete(all, known)
+	}
+	if len(all) > 0 {
+		a.Unknown = all
+	}
+	return nil
 }
 
 // BalanceTime balanceDate as a time, or null when unset.
@@ -193,6 +286,26 @@ type OrgV1 struct {
 	// SimpleFIN server, but it is not guaranteed that IDs are globally unique.
 	// Prefer domain as a globally unique ID for each institution.
 	ID string `json:"id,omitempty"`
+}
+
+// Field reads a value out of an Unknown map and decodes it into T.
+//
+// It reports false when the key is absent or the value does not fit T, so an
+// undocumented field that changes shape degrades to "not present" rather than
+// failing the whole response.
+//
+//	holdings, ok := simplefin.Field[[]Holding](account.Unknown, "holdings")
+//	payee, ok := simplefin.Field[string](tx.Unknown, "payee")
+func Field[T any](unknown map[string]json.RawMessage, key string) (T, bool) {
+	var out T
+	raw, ok := unknown[key]
+	if !ok {
+		return out, false
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, false
+	}
+	return out, true
 }
 
 // epochToTime converts Unix seconds to a time, treating zero and negative

@@ -120,6 +120,19 @@ try {
   `con.somethingnew` is handled as a connection error rather than dropped.
 - **HTML error pages are reported honestly.** The SimpleFIN Bridge answers rejected requests with
   HTML. Status is checked before parsing, so you get an auth error, not a JSON syntax error.
+- **Nothing the server sends is dropped.** Real bridges send fields the spec never documented —
+  `holdings` on accounts, `payee`/`memo`/`mcc` on transactions — and not inside `extra`. They are
+  captured, and you supply the type:
+
+  ```ts
+  const set = await client.getAccounts<{ holdings: Holding[] }, { payee: string }>()
+  set.accounts[0].unknown.holdings                    // typed, completes
+  set.accounts[0].transactions?.[0]?.unknown.payee
+  ```
+
+  ```go
+  holdings, ok := simplefin.Field[[]Holding](account.Unknown, "holdings")
+  ```
 
 ## Editor support
 
@@ -182,6 +195,17 @@ the templates, never the output — `verify` runs in CI and will catch it.
 
 Adding a language is a template directory plus one hand-written client:
 [`docs/PORTING.md`](docs/PORTING.md).
+
+## Verification
+
+Beyond unit tests, the two SDKs are held to each other: every fixture in `spec/golden/` must parse
+to a hand-authored expectation in *both* languages and produce byte-identical canonical output,
+and every fixture in `spec/malformed/` must be rejected by both. Editor support is asserted by
+querying the TypeScript language service and by parsing Go doc comments, rather than assumed.
+
+This has also been run against a real bridge: a live response of 25 accounts and 142 transactions
+parsed cleanly on both the v1 and v2 code paths, producing identical connection and account counts
+from each.
 
 ## Status
 
